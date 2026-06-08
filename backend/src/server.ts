@@ -39,15 +39,15 @@ export function startServer(port: number, host: string) {
         if (event.type === "tool_execution_start") {
           ws.send(JSON.stringify({
             type: "tool_start",
-            name: event.toolCallEvent?.name ?? "unknown",
-            label: event.toolCallEvent?.label ?? event.toolCallEvent?.name ?? "unknown",
+            name: (event as any).toolName ?? "unknown",
+            label: (event as any).toolName ?? "unknown",
           }));
         }
 
         if (event.type === "tool_execution_end") {
           ws.send(JSON.stringify({
             type: "tool_end",
-            name: event.toolCallEvent?.name ?? "unknown",
+            name: (event as any).toolName ?? "unknown",
           }));
         }
       });

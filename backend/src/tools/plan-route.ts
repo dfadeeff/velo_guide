@@ -2,14 +2,13 @@ import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { formatDuration, formatDistance } from "../utils/format.js";
 
-const ORS_URL = "https://api.openrouteservice.org/v2/directions/cycling-regular";
-const ORS_API_KEY = process.env.ORS_API_KEY ?? "";
+const OSRM_URL = "https://router.project-osrm.org/route/v1/bike";
 
 export const planRouteTool: ToolDefinition = {
   name: "plan_route",
   label: "Plan Cycling Route",
   description:
-    "Calculate a cycling route between waypoints using OpenRouteService. Returns real computed distance, cycling time, elevation gain/loss, and step-by-step instructions. ALWAYS use this tool instead of estimating distances or times yourself.",
+    "Calculate a cycling route between waypoints. Returns real computed distance, cycling time, and step-by-step instructions. ALWAYS use this tool instead of estimating distances or times yourself.",
   parameters: Type.Object({
     coordinates: Type.Array(
       Type.Object({
@@ -20,21 +19,14 @@ export const planRouteTool: ToolDefinition = {
     ),
   }),
   execute: async (_toolCallId, params: any) => {
-    const coords = params.coordinates.map((p: any) => [p.lon, p.lat]);
+    const coordStr = params.coordinates
+      .map((p: any) => `${p.lon},${p.lat}`)
+      .join(";");
 
-    const res = await fetch(ORS_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: ORS_API_KEY,
-      },
-      body: JSON.stringify({
-        coordinates: coords,
-        instructions: true,
-        elevation: true,
-        units: "km",
-        language: "en",
-      }),
+    const url = `${OSRM_URL}/${coordStr}?overview=false&steps=true&annotations=distance,duration`;
+
+    const res = await fetch(url, {
+      headers: { "User-Agent": "VeloGuide/1.0" },
     });
 
     if (!res.ok) {
@@ -43,7 +35,7 @@ export const planRouteTool: ToolDefinition = {
         content: [
           {
             type: "text" as const,
-            text: `Routing error (${res.status}): ${errorBody}. This may mean no cycling route exists between these points (e.g., separated by water without a bridge/ferry).`,
+            text: `Routing error (${res.status}): ${errorBody}. This may mean no cycling route exists between these points.`,
           },
         ],
         details: {},
@@ -51,32 +43,38 @@ export const planRouteTool: ToolDefinition = {
     }
 
     const data = await res.json();
-    const route = data.routes?.[0];
 
-    if (!route) {
+    if (data.code !== "Ok" || !data.routes?.length) {
       return {
-        content: [{ type: "text" as const, text: "No route found between the given points." }],
+        content: [
+          {
+            type: "text" as const,
+            text: `No route found: ${data.code}. ${data.message || "The points may be unreachable by bike."}`,
+          },
+        ],
         details: {},
       };
     }
 
-    const summary = route.summary;
-    const steps = route.segments?.flatMap((seg: any) =>
-      seg.steps?.map((step: any) => ({
-        instruction: step.instruction,
-        distance: formatDistance(step.distance * 1000),
-        name: step.name || undefined,
-      })),
+    const route = data.routes[0];
+    const totalDistanceM = route.distance;
+    const totalDurationS = route.duration;
+
+    const steps = route.legs?.flatMap((leg: any) =>
+      leg.steps
+        ?.filter((s: any) => s.maneuver?.type !== "arrive" || s.distance > 0)
+        .map((step: any) => ({
+          instruction: `${step.maneuver?.modifier ? step.maneuver.modifier + " " : ""}${step.maneuver?.type || "continue"}`,
+          distance: formatDistance(step.distance),
+          name: step.name || undefined,
+        })),
     );
 
     const result = {
-      distance: formatDistance(summary.distance * 1000),
-      distance_km: summary.distance.toFixed(1),
-      duration: formatDuration(summary.duration * 1000),
-      duration_hours: (summary.duration / 3600).toFixed(1),
-      ascent_m: Math.round(route.summary.ascent ?? 0),
-      descent_m: Math.round(route.summary.descent ?? 0),
-      bbox: route.bbox,
+      distance: formatDistance(totalDistanceM),
+      distance_km: (totalDistanceM / 1000).toFixed(1),
+      duration: formatDuration(totalDurationS * 1000),
+      duration_hours: (totalDurationS / 3600).toFixed(1),
       instructions: steps?.slice(0, 30),
     };
 
