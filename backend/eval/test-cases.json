@@ -1,0 +1,84 @@
+[
+  {
+    "id": "basic-day-trip",
+    "name": "Basic Day Trip",
+    "input": "Plan a one-day cycling trip from Amsterdam",
+    "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois", "find_knooppunten"],
+    "assertions": [
+      "Response contains a distance sourced from plan_route tool",
+      "Response contains weather information from get_weather tool",
+      "All named POIs appear in find_pois tool results",
+      "Daily distance is between 30-80 km for casual cycling",
+      "Knooppunten junction numbers are mentioned"
+    ]
+  },
+  {
+    "id": "multi-day-experienced",
+    "name": "Multi-Day Experienced Cyclist",
+    "input": "Plan a 3-day trip through the Veluwe for an experienced cyclist",
+    "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois", "find_accommodation", "find_knooppunten"],
+    "assertions": [
+      "Plan has 3 distinct days with separate routes",
+      "Daily distances are 80-130 km",
+      "Accommodation is suggested for each overnight stop",
+      "Veluwe-specific attractions mentioned (Hoge Veluwe, Kröller-Müller, etc.)",
+      "All accommodations appear in find_accommodation tool results"
+    ]
+  },
+  {
+    "id": "specific-destination-beginner",
+    "name": "Specific Destination for Beginner",
+    "input": "I want to cycle from Rotterdam to Kinderdijk to see the windmills. I'm a beginner.",
+    "expected_tools": ["geocode", "plan_route", "get_weather", "find_pois"],
+    "assertions": [
+      "Route distance is under 40 km (one way ~15 km)",
+      "Windmill-related POIs are included",
+      "Beginner-friendly advice is given",
+      "No distances or times are stated without tool backing"
+    ]
+  },
+  {
+    "id": "unreasonable-distance",
+    "name": "Unreasonable Distance Request",
+    "input": "I want to cycle 200 km in one day, I'm a casual cyclist",
+    "expected_tools": ["geocode"],
+    "assertions": [
+      "Agent flags 200 km as unreasonable for a casual cyclist",
+      "Suggests splitting into multiple days or reducing distance",
+      "Does not simply plan a 200 km route without warning"
+    ]
+  },
+  {
+    "id": "far-future-date",
+    "name": "Far Future Date",
+    "input": "Plan a cycling trip from Utrecht for December 2027",
+    "expected_tools": ["geocode", "plan_route", "find_pois"],
+    "assertions": [
+      "Agent plans route and POIs normally",
+      "Agent explains weather forecast is unavailable beyond 16 days",
+      "Does not fabricate weather data"
+    ]
+  },
+  {
+    "id": "seasonal-tulips",
+    "name": "Seasonal Query - Tulips",
+    "input": "Where should I cycle to see tulips in April?",
+    "expected_tools": ["web_search", "geocode", "plan_route"],
+    "assertions": [
+      "Keukenhof or Lisse area is suggested",
+      "Route is planned to the tulip region",
+      "April timing is acknowledged as tulip season"
+    ]
+  },
+  {
+    "id": "non-netherlands",
+    "name": "Out of Scope Location",
+    "input": "Plan a cycling trip in the Swiss Alps",
+    "expected_tools": [],
+    "assertions": [
+      "Agent redirects to Netherlands scope",
+      "Does not plan a Swiss route",
+      "Suggests a Netherlands alternative or asks to refocus"
+    ]
+  }
+]

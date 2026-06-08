@@ -28,7 +28,7 @@ Browser (chat) ←WebSocket→ Express server ←SDK→ pi-agent session
                                                      ↓
                                                7 tools
                                                      ↓
-                           OpenRouteService / OSM Overpass / Open-Meteo / Nominatim
+                           OSRM / OSM Overpass / Open-Meteo / Nominatim
 ```
 
 ### Tools
@@ -36,7 +36,7 @@ Browser (chat) ←WebSocket→ Express server ←SDK→ pi-agent session
 | Tool | API | Purpose |
 |------|-----|---------|
 | `geocode` | Nominatim | Place names → coordinates |
-| `plan_route` | OpenRouteService | Cycling routes with real distances, elevation |
+| `plan_route` | OSRM | Cycling routes with real distances and turn-by-turn |
 | `get_weather` | Open-Meteo | Daily weather forecast |
 | `find_pois` | OSM Overpass | Cafes, restaurants, museums, windmills |
 | `find_accommodation` | OSM Overpass | Hotels, B&Bs, campsites |
@@ -59,6 +59,7 @@ velo_guide/
 ├── backend/
 │   ├── package.json
 │   ├── tsconfig.json
+│   ├── eval/                    # Test cases & evaluation
 │   └── src/
 │       ├── main.ts              # Entry point
 │       ├── server.ts            # Express + WebSocket

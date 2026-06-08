@@ -4,7 +4,7 @@
 
 **Single agent with tool-grounded factuality.** One pi-agent session with 7 domain-specific tools. All quantitative data (distances, times, elevation, weather, POI names) comes exclusively from external API tool calls — the LLM is never allowed to estimate or invent these. This is the primary mitigation for hallucination and the core architectural principle.
 
-**Tool selection.** OpenRouteService for cycling-specific routing (free, no key needed), OSM Overpass for POIs/accommodation/knooppunten (comprehensive Dutch coverage), Open-Meteo for weather (free, no key), Nominatim for geocoding. All free-tier, all production-grade data sources.
+**Tool selection.** OSRM for cycling-specific routing (public demo, no key needed, bike profile), OSM Overpass for POIs/accommodation/knooppunten (comprehensive Dutch coverage), Open-Meteo for weather (free, no key), Nominatim for geocoding. All free-tier, all production-grade data sources.
 
 **Model choice.** Gemini 2.5 Flash via OpenRouter — best cost/quality ratio for this task. Vision-capable (image input), strong tool-calling, fast inference, 1M context window. Claude Sonnet 4 is the production alternative for higher tool-calling reliability.
 
@@ -28,7 +28,7 @@
 | Hallucinated distances/times | `plan_route` tool provides computed values; system prompt forbids estimation |
 | Invented restaurants/places | All POI names come from OSM; system prompt says "ONLY mention tool-returned places" |
 | Weather for far-future dates | `get_weather` tool validates date range, returns clear error message |
-| Impossible routes | OpenRouteService errors surfaced with explanation (water crossing, etc.) |
+| Impossible routes | OSRM errors surfaced with explanation (water crossing, no bike route, etc.) |
 | Over-ambitious daily distances | System prompt includes fitness-level guidelines; agent flags unreasonable plans |
 | Stale/missing data | Disclaimer that OSM data may be incomplete; suggest verifying opening hours |
 
@@ -46,7 +46,7 @@
 ### 100x users (~100 concurrent sessions)
 
 - **Session management**: Move from in-memory to Redis-backed sessions with TTL
-- **API rate limits**: Pool OpenRouteService requests (2,000/day free tier → paid tier or self-hosted ORS instance). Cache common routes (Amsterdam→Utrecht doesn't change daily)
+- **API rate limits**: Cache common routes (Amsterdam→Utrecht doesn't change daily). OSRM public demo has soft rate limits; self-host for guaranteed throughput
 - **LLM costs**: Gemini Flash at ~$2.80/M output tokens handles 100x well. Add request queuing to smooth bursts
 - **Deployment**: Single containerized backend behind a load balancer. WebSocket sticky sessions via IP hash
 
@@ -54,7 +54,7 @@
 
 - **Architecture shift**: Stateless API servers + message queue (Redis Streams / SQS) + worker pool for LLM calls
 - **Caching layer**: Pre-compute and cache popular route corridors, knooppunten graphs, POI clusters. CDN for static frontend
-- **Self-hosted routing**: Deploy OpenRouteService with Dutch OSM extracts — eliminates external API limits entirely
+- **Self-hosted routing**: Deploy OSRM with Dutch OSM extracts — eliminates external API limits entirely
 - **LLM optimization**: Prompt caching for the system prompt (identical across all users). Shorter tool descriptions. Consider fine-tuned smaller model for common queries
 - **Observability**: Structured logging, LLM call tracing, tool latency dashboards, error rate alerting
 - **Multi-region**: Deploy in EU regions close to users. Database for session persistence, user preferences, saved trips
