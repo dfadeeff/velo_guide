@@ -14,7 +14,13 @@ export function startServer(port: number, host: string) {
   app.use(express.static(FRONTEND_DIR));
 
   const server = app.listen(port, host, () => {
+    const overpass = process.env.OVERPASS_URL
+      ? `LOCAL ${process.env.OVERPASS_URL}  (fast)`
+      : "PUBLIC overpass-api.de  (rate-limited, slow — set OVERPASS_URL)";
     console.log(`VeloGuide running at http://localhost:${port}`);
+    console.log(`  model:    ${process.env.MODEL ?? "anthropic/claude-haiku-4.5"}`);
+    console.log(`  overpass: ${overpass}`);
+    console.log(`  routing:  ${process.env.ORS_API_KEY ? "OpenRouteService (cycling network + elevation)" : "OSRM fallback"}`);
   });
 
   const wss = new WebSocketServer({ server });
