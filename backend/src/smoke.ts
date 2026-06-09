@@ -77,6 +77,24 @@ if (text.length < 20) {
 }
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
+// Optional follow-up turn (process.argv[3]) to test multi-turn refinement:
+// does it adjust the existing plan (few tools, no re-ask) vs re-plan from scratch?
+const followUp = process.argv[3];
+if (followUp) {
+  const toolsBefore = toolCalls.length;
+  text = "";
+  const ft0 = Date.now();
+  process.stderr.write(`\n--- FOLLOW-UP: ${followUp} ---\n`);
+  await session.prompt(followUp);
+  const followUpTools = toolCalls.slice(toolsBefore);
+  console.log("\n========== FOLLOW-UP RESULT ==========");
+  console.log(`tools on follow-up: ${followUpTools.length} [${followUpTools.join(", ")}]`);
+  console.log(`follow-up elapsed:  ${((Date.now() - ft0) / 1000).toFixed(1)}s`);
+  console.log(`reply (first 200 chars): ${text.slice(0, 200)}`);
+  const asked = /\?\s*$|which|could you|let me know|what.*prefer/i.test(text.slice(0, 300));
+  console.log(`re-asked instead of adjusting: ${asked}`);
+}
+
 console.log("\n========== TOOLS CALLED ==========");
 console.log(toolCalls.join(", ") || "(none)");
 console.log("\n========== FINAL ITINERARY ==========");
