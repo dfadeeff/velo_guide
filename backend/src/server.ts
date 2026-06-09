@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createVeloGuideSession } from "./agent.js";
+import { FAST_MODE_INSTRUCTION } from "./system-prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.resolve(__dirname, "../../frontend");
@@ -22,6 +23,7 @@ export function startServer(port: number, host: string) {
     console.log("Client connected");
 
     let session: Awaited<ReturnType<typeof createVeloGuideSession>> | null = null;
+    let textCharsThisTurn = 0;
 
     try {
       session = await createVeloGuideSession();
@@ -32,11 +34,19 @@ export function startServer(port: number, host: string) {
         if (event.type === "message_update") {
           const msgEvent = event.assistantMessageEvent;
           if (msgEvent.type === "text_delta") {
+            textCharsThisTurn += msgEvent.delta.length;
             ws.send(JSON.stringify({ type: "delta", text: msgEvent.delta }));
           }
         }
 
         if (event.type === "tool_execution_start") {
+          // The agent gathers ALL data before writing the itinerary, so any
+          // assistant text streamed before a tool runs is planning preamble
+          // ("I'll gather data… now I'll…"). Tell every client to discard it,
+          // so the narration strip lives server-side (works for the web UI,
+          // CLI, and any future API client alike) rather than per-client.
+          textCharsThisTurn = 0;
+          ws.send(JSON.stringify({ type: "reset" }));
           ws.send(JSON.stringify({
             type: "tool_start",
             name: (event as any).toolName ?? "unknown",
@@ -76,9 +86,24 @@ export function startServer(port: number, host: string) {
           ws.send(JSON.stringify({ type: "response_start" }));
 
           try {
-            await session.prompt(msg.text || "", {
+            textCharsThisTurn = 0;
+            const text = msg.fast
+              ? `${msg.text || ""}\n\n${FAST_MODE_INSTRUCTION}`
+              : msg.text || "";
+            await session.prompt(text, {
               images: images?.length ? images : undefined,
             });
+
+            // Reliability guard: the model occasionally ends a turn after
+            // gathering tool data but before writing the itinerary (an empty
+            // completion / premature stop). Detect a turn that produced no
+            // text and re-prompt once to synthesize from the data already in
+            // context — no new tool calls needed.
+            if (textCharsThisTurn < 20) {
+              await session.prompt(
+                "You gathered the data but didn't write the plan. Using ONLY the tool results already in this conversation (do not call any more tools), write the complete final itinerary now.",
+              );
+            }
           } catch (err: any) {
             ws.send(JSON.stringify({ type: "error", message: err.message }));
           }

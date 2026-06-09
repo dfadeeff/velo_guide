@@ -7,14 +7,16 @@ export const findKnooppuntenTool: ToolDefinition = {
   name: "find_knooppunten",
   label: "Find Cycling Junctions (Knooppunten)",
   description:
-    "Find Dutch fietsknooppunten (cycling junction network nodes) near a location. The knooppunten system is a network of numbered junctions connected by signed cycling routes — the standard way to navigate by bike in the Netherlands. Returns junction numbers and coordinates.",
+    "Find Dutch fietsknooppunten (cycling junction network nodes) near a location. The knooppunten system is a network of numbered junctions connected by signed cycling routes — the standard way to navigate by bike in the Netherlands. Returns the junction numbers that EXIST NEAR the given point, sorted by distance. IMPORTANT: this is a proximity list, NOT a routed sequence — it does not tell you which junctions connect to which, nor in what order to ride them. Do not present these numbers as a turn-by-turn route (e.g. '12 → 45 → 63').",
   parameters: Type.Object({
     lat: Type.Number({ description: "Latitude of search center" }),
     lon: Type.Number({ description: "Longitude of search center" }),
-    radius_m: Type.Number({
-      description: "Search radius in meters (default 10000)",
-      default: 10000,
-    }),
+    radius_m: Type.Optional(
+      Type.Number({
+        description: "Search radius in meters (optional, default 10000)",
+        default: 10000,
+      }),
+    ),
   }),
   execute: async (_toolCallId, params: any) => {
     const radius = params.radius_m || 10000;
@@ -25,17 +27,17 @@ export const findKnooppuntenTool: ToolDefinition = {
     try {
       const elements = await queryOverpass(query);
 
+      // Compact output: junction number + distance is enough to list "knooppunten
+      // in the area". Coordinates are dropped to keep the context small (verbose
+      // tool results slow the model's final generation sharply).
       const junctions = elements
         .filter((el) => el.lat && el.tags?.rcn_ref)
         .map((el) => ({
           junction_number: el.tags!.rcn_ref,
-          lat: el.lat!,
-          lon: el.lon!,
           distance_m: Math.round(haversineDistance(params.lat, params.lon, el.lat!, el.lon!)),
-          name: el.tags?.name || undefined,
         }))
         .sort((a, b) => a.distance_m - b.distance_m)
-        .slice(0, 40);
+        .slice(0, 15);
 
       if (!junctions.length) {
         return {
@@ -49,11 +51,17 @@ export const findKnooppuntenTool: ToolDefinition = {
         };
       }
 
+      const result = {
+        note: "These are knooppunten NEAR the given point, sorted by distance. This is a proximity list, not a connected route — adjacency between junctions is unknown. Mention these as 'knooppunten in the area' or 'near this segment'; do NOT invent an ordered sequence.",
+        count: junctions.length,
+        junctions,
+      };
+
       return {
         content: [
           {
             type: "text" as const,
-            text: `Found ${junctions.length} cycling junctions (knooppunten) near (${params.lat}, ${params.lon}):\n${JSON.stringify(junctions, null, 2)}`,
+            text: JSON.stringify(result, null, 2),
           },
         ],
         details: {},

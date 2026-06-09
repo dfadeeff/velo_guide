@@ -74,6 +74,26 @@ body {
   color: var(--text-secondary);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 48px;
+  text-align: right;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+.timer.running {
+  background: var(--accent-light);
+  color: var(--accent);
+}
 .status-pill {
   display: flex;
   align-items: center;
@@ -276,6 +296,39 @@ body {
 .upload-btn:hover {
   background: var(--bg);
   color: var(--accent);
+}
+
+.fast-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.fast-toggle:hover {
+  background: var(--bg);
+}
+
+.fast-toggle:has(input:checked) {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fast-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 textarea {

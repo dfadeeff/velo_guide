@@ -26,10 +26,12 @@ export const findPoisTool: ToolDefinition = {
   parameters: Type.Object({
     lat: Type.Number({ description: "Latitude of search center" }),
     lon: Type.Number({ description: "Longitude of search center" }),
-    radius_m: Type.Number({
-      description: "Search radius in meters (default 2000)",
-      default: 2000,
-    }),
+    radius_m: Type.Optional(
+      Type.Number({
+        description: "Search radius in meters (optional, default 2000)",
+        default: 2000,
+      }),
+    ),
     categories: Type.Array(Type.String(), {
       description: `Categories to search. Options: ${Object.keys(CATEGORY_MAP).join(", ")}`,
     }),
@@ -59,23 +61,25 @@ export const findPoisTool: ToolDefinition = {
     try {
       const elements = await queryOverpass(query);
 
+      // Keep output compact: a named place + distance is all the model needs to
+      // write the itinerary. Coordinates and unnamed nodes are dropped — verbose
+      // tool results bloat the context and sharply slow the final generation.
       const pois = elements
         .filter((el) => el.lat || el.center)
         .map((el) => {
           const elLat = el.lat ?? el.center!.lat;
           const elLon = el.lon ?? el.center!.lon;
           return {
-            name: el.tags?.name || el.tags?.["name:en"] || "Unnamed",
+            name: el.tags?.name || el.tags?.["name:en"] || "",
             type: el.tags?.amenity || el.tags?.tourism || el.tags?.shop || el.tags?.man_made || el.tags?.historic || "unknown",
-            lat: elLat,
-            lon: elLon,
             distance_m: Math.round(haversineDistance(params.lat, params.lon, elLat, elLon)),
             opening_hours: el.tags?.opening_hours || undefined,
             website: el.tags?.website || undefined,
           };
         })
+        .filter((p) => p.name)
         .sort((a, b) => a.distance_m - b.distance_m)
-        .slice(0, 20);
+        .slice(0, 10);
 
       if (!pois.length) {
         return {

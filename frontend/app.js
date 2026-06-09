@@ -3,10 +3,36 @@ const form = document.getElementById("input-form");
 const input = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
 const imageInput = document.getElementById("image-input");
+const fastCheckbox = document.getElementById("fast-checkbox");
 const imagePreview = document.getElementById("image-preview");
 const statusDot = document.getElementById("status-dot");
 const statusLabel = document.getElementById("status-label");
 const toolStatus = document.getElementById("tool-status");
+const timerEl = document.getElementById("timer");
+
+let timerInterval = null;
+let queryStart = 0;
+
+function startTimer() {
+  queryStart = performance.now();
+  timerEl.classList.add("running");
+  const tick = () => {
+    timerEl.textContent = ((performance.now() - queryStart) / 1000).toFixed(1) + "s";
+  };
+  tick();
+  timerInterval = setInterval(tick, 100);
+}
+
+function stopTimer() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  if (queryStart) {
+    timerEl.textContent = ((performance.now() - queryStart) / 1000).toFixed(1) + "s";
+  }
+  timerEl.classList.remove("running");
+}
 
 let ws = null;
 let pendingImages = [];
@@ -56,11 +82,21 @@ function handleMessage(msg) {
       currentAssistantMsg = addMessage("assistant", "");
       activeTools.clear();
       toolStatus.innerHTML = "";
+      startTimer();
       break;
 
     case "delta":
       if (currentAssistantMsg) {
         appendDelta(currentAssistantMsg, msg.text);
+      }
+      break;
+
+    case "reset":
+      // Server signals that prior streamed text was planning preamble — discard
+      // it so only the final itinerary (after the last tool) is shown.
+      if (currentAssistantMsg) {
+        rawText = "";
+        currentAssistantMsg.innerHTML = "";
       }
       break;
 
@@ -80,6 +116,7 @@ function handleMessage(msg) {
 
     case "response_end":
       isStreaming = false;
+      stopTimer();
       setStatus("connected", "Ready");
       sendBtn.disabled = false;
       activeTools.clear();
@@ -91,6 +128,7 @@ function handleMessage(msg) {
       break;
 
     case "error":
+      stopTimer();
       setStatus("connected", "Ready");
       isStreaming = false;
       sendBtn.disabled = false;
@@ -202,6 +240,9 @@ form.addEventListener("submit", (e) => {
   const payload = { type: "prompt", text: text || "What do you see in this image?" };
   if (pendingImages.length) {
     payload.images = pendingImages;
+  }
+  if (fastCheckbox?.checked) {
+    payload.fast = true;
   }
   ws.send(JSON.stringify(payload));
 

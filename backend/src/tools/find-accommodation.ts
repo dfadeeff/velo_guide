@@ -20,10 +20,12 @@ export const findAccommodationTool: ToolDefinition = {
   parameters: Type.Object({
     lat: Type.Number({ description: "Latitude" }),
     lon: Type.Number({ description: "Longitude" }),
-    radius_m: Type.Number({
-      description: "Search radius in meters (default 5000)",
-      default: 5000,
-    }),
+    radius_m: Type.Optional(
+      Type.Number({
+        description: "Search radius in meters (optional, default 5000)",
+        default: 5000,
+      }),
+    ),
     types: Type.Optional(
       Type.Array(Type.String(), {
         description: `Accommodation types to search. Options: ${Object.keys(ACCOMMODATION_TYPES).join(", ")}. Default: all.`,

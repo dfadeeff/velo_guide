@@ -26,9 +26,12 @@
           <p class="header-sub">AI Cycling Trip Planner for the Netherlands</p>
         </div>
       </div>
-      <div class="status-pill" id="status-pill">
-        <span class="status-dot" id="status-dot"></span>
-        <span id="status-label">Connecting...</span>
+      <div class="header-right">
+        <span class="timer" id="timer" title="Time for the current/last query">—</span>
+        <div class="status-pill" id="status-pill">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="status-label">Connecting...</span>
+        </div>
       </div>
     </header>
 
@@ -51,6 +54,10 @@
             <path d="M21 15l-3.086-3.086a2 2 0 00-2.828 0L6 21"/>
           </svg>
           <input type="file" id="image-input" accept="image/*" multiple hidden>
+        </label>
+        <label class="fast-toggle" id="fast-toggle" title="Fast mode: quicker, more compact plans">
+          <input type="checkbox" id="fast-checkbox">
+          <span>⚡ Fast</span>
         </label>
         <textarea id="message-input" placeholder="Plan a 2-day cycling trip from Amsterdam..." rows="1"></textarea>
         <button type="submit" id="send-btn" disabled>
