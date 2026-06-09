@@ -93,7 +93,10 @@ export function startServer(port: number, host: string) {
 
           try {
             textCharsThisTurn = 0;
-            const text = msg.fast
+            // Fast mode is the DEFAULT (compact plans, fewer turns). A client
+            // opts into detailed mode by sending fast === false.
+            const fast = msg.fast !== false;
+            const text = fast
               ? `${msg.text || ""}\n\n${FAST_MODE_INSTRUCTION}`
               : msg.text || "";
             await session.prompt(text, {

@@ -241,9 +241,9 @@ form.addEventListener("submit", (e) => {
   if (pendingImages.length) {
     payload.images = pendingImages;
   }
-  if (fastCheckbox?.checked) {
-    payload.fast = true;
-  }
+  // Always send the flag so the server knows detailed was explicitly chosen
+  // (fast is the default; unchecking opts into a fuller plan).
+  payload.fast = !!fastCheckbox?.checked;
   ws.send(JSON.stringify(payload));
 
   // Reset
