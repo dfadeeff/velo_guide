@@ -20,13 +20,13 @@ make run
 
 Open http://localhost:3000 in your browser.
 
-> **⚠️ Strongly recommended for usable latency:** set up a **[local Overpass](#fast-local-overpass-recommended)** (see below) before serious use. Without it, POI/junction lookups hit the rate-limited public OSM endpoint and a full plan can take minutes; with it, well under 30s. The app falls back to the public endpoint automatically if it's not configured.
+> **⚠️ Strongly recommended for usable latency:** set up a **[local Overpass](#fast-local-overpass-recommended)** (see below) before serious use. Without it, POI/junction lookups hit the rate-limited public OSM endpoint and a full plan takes ~1 minute when un-throttled, several minutes when rate-limited; with it, ~15–35s (day trips typically under 20s). The app falls back to the public endpoint automatically if it's not configured.
 
 > **Tip:** **⚡ Fast** mode (next to the input) is **on by default** — the model batches its tool calls and writes a compact, scannable plan. Uncheck it for a fuller, more detailed multi-day itinerary.
 
 ### Fast local Overpass (recommended)
 
-POI and junction lookups use the public OSM Overpass API, which is rate-limited and slow under load. Running a local Overpass with just the Netherlands extract removes the limit and brings a full plan well under 30s.
+POI and junction lookups use the public OSM Overpass API, which is rate-limited and slow under load. Running a local Overpass with just the Netherlands extract removes the limit and brings a full plan to ~15–35s (measured: day trips 15–20s, 3-day trips up to ~35s).
 
 One-time setup (needs Docker). Budget **~30–60 min** total, mostly hands-off: ~1.3 GB download, then a PBF→OSM-XML conversion (single-threaded bzip2, the slow part), then the database import. It runs in the background in a persistent Docker volume, so you only do it once.
 
