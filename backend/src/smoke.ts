@@ -110,5 +110,16 @@ console.log(`find_knooppunten called:     ${toolCalls.includes("find_knooppunten
 console.log(`no fabricated junction seq:  ${!fab}`);
 console.log(`elapsed:                     ${elapsed}s`);
 
+// Hard failures only (so the exit code is CI-usable): the agent must have used
+// tools, produced an itinerary, and not fabricated a junction sequence. The
+// per-tool lines above stay informational — not every prompt needs every tool.
+const failures: string[] = [];
+if (!toolCalls.length) failures.push("no tools were called");
+if (text.length < 200) failures.push(`itinerary too short (${text.length} chars)`);
+if (fab) failures.push("output contains a fabricated junction sequence");
+if (failures.length) {
+  console.error(`\nSMOKE FAILED: ${failures.join("; ")}`);
+}
+
 session.dispose();
-process.exit(0);
+process.exit(failures.length ? 1 : 0);

@@ -15,8 +15,8 @@ One turn flows like this:
    `noTools: "builtin"`).
 2. It emits tool calls as structured JSON; pi-agent validates them against the
    schemas before our `execute` runs.
-3. Each tool hits a real data source (OSRM / OSM Overpass / Open-Meteo /
-   Nominatim) and returns text into the conversation.
+3. Each tool hits a real data source (OpenRouteService or OSRM / OSM Overpass /
+   Open-Meteo / Nominatim) and returns text into the conversation.
 4. The model reads the results and either calls more tools or writes the final
    itinerary. The loop repeats until it stops calling tools.
 
@@ -63,6 +63,7 @@ to a deterministic source. This is the core anti-hallucination strategy.
 - The Dutch knooppunten network is the primary navigation system cyclists use
 - OSM data quality for the Netherlands is high (it is — NL has exceptional OSM coverage)
 - Weather forecasts beyond 16 days are unreliable; the agent communicates this limitation
+- **Accommodation booking, pricing, and availability are out of scope** (per the brief). We still surface OSM-listed places to stay, but only as overnight *anchors* a multi-day route needs — the rider books on their own
 - **Conversation is multi-turn.** Trip planning is iterative ("make day 2 shorter", "swap the museum for something outdoors"), so each browser connection holds a persistent pi-agent session and the user can refine a plan across turns. Compaction keeps the growing transcript within context.
 - **Image input is a secondary modality.** The task names images as "possibly" present, so we support one clear use case — interpreting a photo of a place/landscape to infer region or vibe preferences — rather than over-investing. The multimodal path is wired end-to-end (`session.prompt(text, { images })`), but text is the primary interface.
 
@@ -70,13 +71,16 @@ to a deterministic source. This is the core anti-hallucination strategy.
 
 | Issue | Mitigation |
 |-------|------------|
-| Premature stop / empty completion | The model occasionally ends a turn after gathering tool data but before writing the plan. Primary mitigation: a reliable model (Sonnet). Backstop: a guard that detects a turn producing no itinerary text and re-prompts once to synthesize from the data already in context |
+| Premature stop / empty completion | The model occasionally ends a turn after gathering tool data but before writing the plan. Primary mitigation: a model measured reliable in tool loops (Haiku 4.5 default; Sonnet 4.6 as the quality upgrade — Gemini Flash was rejected for exactly this failure). Backstop: a guard that detects a turn producing no itinerary text and re-prompts once to synthesize from the data already in context |
 | Hallucinated distances/times | `plan_route` tool provides computed values; system prompt forbids estimation |
 | Invented restaurants/places | All POI names come from OSM; system prompt says "ONLY mention tool-returned places" |
 | Weather for far-future dates | `get_weather` tool validates date range, returns clear error message |
 | Impossible routes | OSRM errors surfaced with explanation (water crossing, no bike route, etc.) |
 | Over-ambitious daily distances | System prompt includes fitness-level guidelines; agent flags unreasonable plans |
 | Fabricated knooppunten sequences | `find_knooppunten` returns a *proximity list* (with an explicit `note`), and the prompt forbids presenting junctions as an ordered "12 → 45 → 63" route — the one place the grounding invariant could leak is closed by framing junctions as "in the area" |
+| Stale sense of "today" | LLMs resolve "tomorrow" against their training cutoff. The current date (Europe/Amsterdam) is injected into the system prompt at session creation, so relative dates and `get_weather` calls resolve correctly |
+| Guessed compass directions | The model invents bearings ("ride northeast to Kinderdijk" — it's southeast). `plan_route` now returns a computed per-leg cardinal bearing; the prompt forbids stating directions not present in tool output |
+| Unbalanced multi-day plans | A 13 km "day" between two 40 km days reads as a planning failure. Hard prompt rule: days must be roughly comparable (no day < half the longest, full days ≥ ~30 km) unless the user asks for a rest day |
 | Stale/missing data | Disclaimer that OSM data may be incomplete; suggest verifying opening hours |
 
 ## Limitations
@@ -100,7 +104,7 @@ to a deterministic source. This is the core anti-hallucination strategy.
 
 - **Session management**: Move from in-memory to Redis-backed sessions with TTL
 - **API rate limits**: Cache common routes (Amsterdam→Utrecht doesn't change daily). OSRM public demo has soft rate limits; self-host for guaranteed throughput
-- **LLM costs**: Gemini Flash at ~$2.80/M output tokens handles 100x well. Add request queuing to smooth bursts
+- **LLM costs**: Claude Haiku 4.5 (~$5/M output tokens, ~3× cheaper than Sonnet) handles 100x well; per-plan cost is cents. Add request queuing to smooth bursts
 - **Deployment**: Single containerized backend behind a load balancer. WebSocket sticky sessions via IP hash
 
 ### 10,000x users (~10,000 concurrent sessions)

@@ -94,19 +94,34 @@ Does the output demonstrate genuine Netherlands cycling knowledge?
 
 ### Scenario 7: Seasonal Query
 **Input**: "Where should I cycle to see tulips in April?"
-**Expected**: Web search for tulip season info, suggest Keukenhof/Lisse area, plan route.
+**Expected**: Suggest Keukenhof/Lisse area and plan a route there for the next April (the model knows today's date). If that is beyond the 16-day forecast window, note that weather must be checked closer to the date. `web_search` is optional (e.g. for festival dates) — the prompt deliberately discourages it.
 
-## Automated Evaluation (Future)
+## Automated Evaluation (`make eval`)
 
-For regression testing at scale:
+The grounding-related half of this plan is **implemented and runnable**: `make eval`
+drives every case in `backend/eval/test-cases.json` through a real headless agent
+session and scores it programmatically (exit code is CI-usable). Per case it checks:
 
-1. **Tool call trace analysis**: Parse agent event logs, verify every factual claim maps to a tool result
-2. **LLM-as-judge**: Use a second LLM to evaluate completeness and Dutch authenticity against the checklist
-3. **Response time tracking**: Measure end-to-end latency (target: <30s for a complete itinerary)
-4. **A/B model comparison**: Run same scenarios across Gemini Flash vs Claude Sonnet, score both
+1. **Expected tools were called** (trace analysis of the agent event stream)
+2. **No fabricated knooppunten sequences** (`12 → 45 → 63` pattern)
+3. **Junction numbers are grounded**: every number in a "knooppunten …:" list appears in `find_knooppunten` output
+4. **POI usage**: the reply names places returned by `find_pois`/`find_accommodation`
+5. **Day distances match `plan_route`** within 2% — catches estimated-not-computed numbers
+6. **Latency** per case is reported (target: <30s with a local Overpass)
+
+Run a single case with `CASE=basic-day-trip make eval`; `FAST=0` evaluates the
+detailed (non-fast) mode. The judgment-call assertions in `test-cases.json`
+(e.g. "beginner-friendly advice is given") are printed alongside each case for
+manual review. `make smoke` runs one ad-hoc prompt with the same checks plus a
+timestamped latency trace.
+
+### Future automation
+
+1. **LLM-as-judge**: a second LLM scores completeness and Dutch authenticity against the checklists above (dimensions 5 & 7)
+2. **A/B model comparison**: run the same suite across Claude Haiku (default) vs Claude Sonnet (quality upgrade) vs Gemini Flash (cost floor), score all
 
 ## Evaluation Cadence
 
-- **Pre-release**: Run all 7 scenarios manually, score all dimensions
-- **Weekly**: Automated regression on scenarios 1, 2, 3, 5, 6
-- **Per model change**: Full evaluation suite with LLM-as-judge scoring
+- **Pre-release**: `make eval` + manual scoring of all dimensions on the 7 scenarios
+- **Weekly**: `make eval` regression (automated checks on all scenarios)
+- **Per model change**: full suite including manual/LLM-as-judge dimensions

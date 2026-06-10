@@ -9,7 +9,9 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { veloGuideTools } from "./tools/index.js";
-import { SYSTEM_PROMPT } from "./system-prompt.js";
+import { buildSystemPrompt } from "./system-prompt.js";
+
+export const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
 
 export async function createVeloGuideSession() {
   const authStorage = AuthStorage.create("/tmp/velo-guide/auth.json");
@@ -26,7 +28,7 @@ export async function createVeloGuideSession() {
   // lowest cost (google/gemini-2.5-flash). All via the same OPENROUTER_API_KEY.
   // Cast: getModel's id param is a union of known literals; an env override is
   // an arbitrary string that OpenRouter resolves at runtime.
-  const modelId = (process.env.MODEL ?? "anthropic/claude-haiku-4.5") as Parameters<typeof getModel>[1];
+  const modelId = (process.env.MODEL ?? DEFAULT_MODEL) as Parameters<typeof getModel>[1];
   const model = getModel("openrouter", modelId);
   if (!model) throw new Error(`Model ${modelId} not found`);
 
@@ -45,7 +47,7 @@ export async function createVeloGuideSession() {
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
-    getSystemPrompt: () => SYSTEM_PROMPT,
+    getSystemPrompt: () => buildSystemPrompt(),
     getAppendSystemPrompt: () => [],
     extendResources: () => {},
     reload: async () => {},

@@ -56,11 +56,21 @@ export const getWeatherTool: ToolDefinition = {
       };
     }
 
+    // A range that straddles the horizon (start inside, end beyond) would get a
+    // raw 400 from Open-Meteo — clamp the end and say so instead.
+    const maxDateStr = maxForecast.toISOString().split("T")[0];
+    let endDate = params.end_date;
+    let clampNote = "";
+    if (new Date(params.end_date) > maxForecast) {
+      endDate = maxDateStr;
+      clampNote = `Note: forecast truncated at ${maxDateStr} (16-day horizon); advise checking weather for later days closer to the trip.\n`;
+    }
+
     const url = new URL(OPEN_METEO_URL);
     url.searchParams.set("latitude", String(params.lat));
     url.searchParams.set("longitude", String(params.lon));
     url.searchParams.set("start_date", params.start_date);
-    url.searchParams.set("end_date", params.end_date);
+    url.searchParams.set("end_date", endDate);
     url.searchParams.set("daily", [
       "temperature_2m_max",
       "temperature_2m_min",
@@ -107,7 +117,7 @@ export const getWeatherTool: ToolDefinition = {
     }));
 
     return {
-      content: [{ type: "text" as const, text: JSON.stringify(forecast, null, 2) }],
+      content: [{ type: "text" as const, text: clampNote + JSON.stringify(forecast, null, 2) }],
       details: {},
     };
   },

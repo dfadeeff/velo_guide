@@ -41,7 +41,7 @@
     "id": "unreasonable-distance",
     "name": "Unreasonable Distance Request",
     "input": "I want to cycle 200 km in one day, I'm a casual cyclist",
-    "expected_tools": ["geocode"],
+    "expected_tools": [],
     "assertions": [
       "Agent flags 200 km as unreasonable for a casual cyclist",
       "Suggests splitting into multiple days or reducing distance",
@@ -63,11 +63,11 @@
     "id": "seasonal-tulips",
     "name": "Seasonal Query - Tulips",
     "input": "Where should I cycle to see tulips in April?",
-    "expected_tools": ["web_search", "geocode", "plan_route"],
+    "expected_tools": ["geocode", "plan_route"],
     "assertions": [
       "Keukenhof or Lisse area is suggested",
       "Route is planned to the tulip region",
-      "April timing is acknowledged as tulip season"
+      "April timing is acknowledged as tulip season (next April if it has passed this year)"
     ]
   },
   {

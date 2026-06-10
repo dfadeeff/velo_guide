@@ -2,7 +2,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createVeloGuideSession } from "./agent.js";
+import { createVeloGuideSession, DEFAULT_MODEL } from "./agent.js";
 import { FAST_MODE_INSTRUCTION } from "./system-prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,18 +18,38 @@ export function startServer(port: number, host: string) {
       ? `LOCAL ${process.env.OVERPASS_URL}  (fast)`
       : "PUBLIC overpass-api.de  (rate-limited, slow — set OVERPASS_URL)";
     console.log(`VeloGuide running at http://localhost:${port}`);
-    console.log(`  model:    ${process.env.MODEL ?? "anthropic/claude-haiku-4.5"}`);
+    console.log(`  model:    ${process.env.MODEL ?? DEFAULT_MODEL}`);
     console.log(`  overpass: ${overpass}`);
     console.log(`  routing:  ${process.env.ORS_API_KEY ? "OpenRouteService (cycling network + elevation)" : "OSRM fallback"}`);
   });
 
   const wss = new WebSocketServer({ server });
 
+  // Heartbeat: ping every 30s and drop connections that miss a pong, so dead
+  // sockets (sleep, network change, proxy idle-close) are detected instead of
+  // lingering, and intermediaries see traffic on long-idle chats.
+  const HEARTBEAT_MS = 30_000;
+  const alive = new WeakMap<WebSocket, boolean>();
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (alive.get(ws) === false) {
+        ws.terminate();
+        continue;
+      }
+      alive.set(ws, false);
+      ws.ping();
+    }
+  }, HEARTBEAT_MS);
+  wss.on("close", () => clearInterval(heartbeat));
+
   wss.on("connection", async (ws: WebSocket) => {
     console.log("Client connected");
+    alive.set(ws, true);
+    ws.on("pong", () => alive.set(ws, true));
 
     let session: Awaited<ReturnType<typeof createVeloGuideSession>> | null = null;
     let textCharsThisTurn = 0;
+    let busy = false;
 
     try {
       session = await createVeloGuideSession();
@@ -83,6 +103,15 @@ export function startServer(port: number, host: string) {
         const msg = JSON.parse(raw.toString());
 
         if (msg.type === "prompt") {
+          // The web client disables its send button while streaming, but the
+          // server is the authority: a second tab (or any raw client) must not
+          // interleave prompts into a session mid-turn.
+          if (busy) {
+            ws.send(JSON.stringify({ type: "error", message: "Still working on the previous request — please wait for it to finish." }));
+            return;
+          }
+          busy = true;
+
           const images = msg.images?.map((img: any) => ({
             type: "image" as const,
             data: img.data,
@@ -115,6 +144,8 @@ export function startServer(port: number, host: string) {
             }
           } catch (err: any) {
             ws.send(JSON.stringify({ type: "error", message: err.message }));
+          } finally {
+            busy = false;
           }
 
           ws.send(JSON.stringify({ type: "response_end" }));

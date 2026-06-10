@@ -39,6 +39,7 @@ let pendingImages = [];
 let currentAssistantMsg = null;
 let isStreaming = false;
 let activeTools = new Set();
+let hadSession = false; // a "ready" was received before — any later "ready" is a reconnect
 
 function connect() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -72,6 +73,13 @@ function setStatus(state, label) {
 function handleMessage(msg) {
   switch (msg.type) {
     case "ready":
+      // Each connection gets a fresh agent session server-side, so a reconnect
+      // silently loses the conversation. Say so — otherwise the user keeps
+      // refining a plan the agent no longer remembers.
+      if (hadSession) {
+        addSystemNote("Connection was lost and a new conversation has started — the previous plan's context was cleared. Please re-state your request.");
+      }
+      hadSession = true;
       setStatus("connected", "Ready");
       sendBtn.disabled = false;
       break;
@@ -138,6 +146,17 @@ function handleMessage(msg) {
 }
 
 let rawText = "";
+
+function addSystemNote(text) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "message system";
+  const content = document.createElement("div");
+  content.className = "message-content";
+  content.textContent = text;
+  wrapper.appendChild(content);
+  chat.appendChild(wrapper);
+  scrollToBottom();
+}
 
 function addMessage(role, text) {
   const wrapper = document.createElement("div");

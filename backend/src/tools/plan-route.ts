@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { formatDuration, formatDistance } from "../utils/format.js";
+import { formatDuration, formatDistance, cardinalBearing } from "../utils/format.js";
 
 // OpenRouteService routes on the actual cycling network (Dutch fietspaden) and
 // returns elevation + human-readable turn instructions. It needs a valid
@@ -22,9 +22,23 @@ interface RouteResult {
   distance_km: string;
   duration: string;
   duration_hours: string;
+  // Cardinal direction of each waypoint-to-waypoint leg ("Rotterdam → Kinderdijk:
+  // southeast"). Computed from the input coordinates so the model never has to
+  // guess compass directions in its prose.
+  leg_bearings: string[];
   ascent_m?: number;
   descent_m?: number;
   instructions?: Array<{ instruction: string; distance: string; name?: string }>;
+}
+
+function legBearings(coords: Array<{ lon: number; lat: number }>): string[] {
+  const legs: string[] = [];
+  for (let i = 0; i < coords.length - 1; i++) {
+    const a = coords[i];
+    const b = coords[i + 1];
+    legs.push(`leg ${i + 1}: heading ${cardinalBearing(a.lat, a.lon, b.lat, b.lon)}`);
+  }
+  return legs;
 }
 
 async function planWithORS(coords: Array<{ lon: number; lat: number }>): Promise<RouteResult> {
@@ -65,6 +79,7 @@ async function planWithORS(coords: Array<{ lon: number; lat: number }>): Promise
     distance_km: (summary.distance / 1000).toFixed(1),
     duration: formatDuration(summary.duration * 1000),
     duration_hours: (summary.duration / 3600).toFixed(1),
+    leg_bearings: legBearings(coords),
     ascent_m: feature.properties.ascent != null ? Math.round(feature.properties.ascent) : undefined,
     descent_m: feature.properties.descent != null ? Math.round(feature.properties.descent) : undefined,
     instructions: steps.slice(0, 8),
@@ -111,6 +126,7 @@ async function planWithOSRM(coords: Array<{ lon: number; lat: number }>): Promis
     distance_km: (route.distance / 1000).toFixed(1),
     duration: formatDuration(cyclingSeconds * 1000),
     duration_hours: (cyclingSeconds / 3600).toFixed(1),
+    leg_bearings: legBearings(coords),
     instructions: steps?.slice(0, 8),
   };
 }
@@ -119,7 +135,7 @@ export const planRouteTool: ToolDefinition = {
   name: "plan_route",
   label: "Plan Cycling Route",
   description:
-    "Calculate a cycling route between waypoints. Returns real computed distance, cycling time, elevation gain, and step-by-step instructions. Routes follow the Dutch cycling network where possible. ALWAYS use this tool instead of estimating distances or times yourself.",
+    "Calculate a cycling route between waypoints. Returns real computed distance, cycling time, elevation gain, per-leg compass bearings, and step-by-step instructions. Routes follow the Dutch cycling network where possible. ALWAYS use this tool instead of estimating distances, times, or directions yourself.",
   parameters: Type.Object({
     coordinates: Type.Array(
       Type.Object({

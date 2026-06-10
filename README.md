@@ -22,7 +22,7 @@ Open http://localhost:3000 in your browser.
 
 > **⚠️ Strongly recommended for usable latency:** set up a **[local Overpass](#fast-local-overpass-recommended)** (see below) before serious use. Without it, POI/junction lookups hit the rate-limited public OSM endpoint and a full plan can take minutes; with it, well under 30s. The app falls back to the public endpoint automatically if it's not configured.
 
-> **Tip:** Toggle **⚡ Fast** next to the input for quicker, more compact plans (the model batches its tool calls and writes a tighter itinerary). Leave it off for full, detailed multi-day plans.
+> **Tip:** **⚡ Fast** mode (next to the input) is **on by default** — the model batches its tool calls and writes a compact, scannable plan. Uncheck it for a fuller, more detailed multi-day itinerary.
 
 ### Fast local Overpass (recommended)
 
@@ -89,7 +89,7 @@ Browser (chat) ←WebSocket→ Express server ←SDK→ pi-agent session
 
 ### Stack
 
-- **LLM**: Claude Sonnet 4.6 via OpenRouter (default; reliable tool-calling). Set `MODEL=google/gemini-2.5-flash` for a low-cost vision-capable alternative.
+- **LLM**: Claude Haiku 4.5 via OpenRouter (default; ~2× Sonnet's throughput, reliable tool-calling — see DECISIONS.md). Set `MODEL=anthropic/claude-sonnet-4.6` for higher reasoning quality, or `MODEL=google/gemini-2.5-flash` for the lowest cost.
 - **Agent**: pi-agent SDK (`@earendil-works/pi-coding-agent`)
 - **Backend**: TypeScript, Express, WebSocket
 - **Frontend**: Vanilla HTML/CSS/JS, marked.js for markdown
@@ -103,7 +103,7 @@ velo_guide/
 ├── backend/
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── eval/                    # Test cases & evaluation
+│   ├── eval/                    # Test cases + runnable eval harness (make eval)
 │   └── src/
 │       ├── main.ts              # Entry point
 │       ├── server.ts            # Express + WebSocket
@@ -122,4 +122,12 @@ velo_guide/
 ```bash
 make lint    # Type-check
 make run     # Start dev server
+make smoke   # One real headless agent turn with tool/latency trace + grounding checks
+make eval    # Run the eval suite (backend/eval/test-cases.json) with a pass/fail scorecard
+```
+
+`make smoke` accepts a custom prompt and an optional follow-up turn:
+
+```bash
+cd backend && npx tsx src/smoke.ts "Plan a 2-day trip from Utrecht" "make day 2 shorter"
 ```

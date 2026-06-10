@@ -6,14 +6,17 @@
   "scripts": {
     "dev": "tsx src/main.ts",
     "build": "tsc",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "smoke": "tsx src/smoke.ts",
+    "eval": "tsx eval/run-eval.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "latest",
-    "@earendil-works/pi-ai": "latest",
-    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-agent-core": "^0.78.1",
+    "@earendil-works/pi-ai": "^0.78.1",
+    "@earendil-works/pi-coding-agent": "^0.78.1",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "typebox": "^1.1.38",
     "ws": "^8.18.0"
   },
   "devDependencies": {
