@@ -71,6 +71,19 @@
     ]
   },
   {
+    "id": "image-input",
+    "name": "Image Input - Landscape Photo",
+    "input": "I want to cycle somewhere that looks like this. One day, starting from Rotterdam.",
+    "image": "fixtures/dutch-windmill.jpg",
+    "expected_tools": ["geocode", "plan_route"],
+    "reply_must_match": "windmill|molen|kinderdijk|polder",
+    "assertions": [
+      "Image is recognized as a Dutch windmill / polder landscape",
+      "A matching region is suggested (e.g. Kinderdijk windmill area)",
+      "A route is planned from Rotterdam to the suggested area"
+    ]
+  },
+  {
     "id": "non-netherlands",
     "name": "Out of Scope Location",
     "input": "Plan a cycling trip in the Swiss Alps",

@@ -1,6 +1,9 @@
 // Headless smoke test: drives one real agent turn and reports tool usage.
 // Usage: npx tsx src/smoke.ts "Plan a one-day cycling trip from Amsterdam"
+//        npx tsx src/smoke.ts "<prompt>" "<follow-up turn>"     # multi-turn check
+//        IMAGE=eval/fixtures/dutch-windmill.jpg npx tsx src/smoke.ts "Somewhere like this?"
 import dotenv from "dotenv";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -18,6 +21,17 @@ const { FAST_MODE_INSTRUCTION } = await import("./system-prompt.js");
 const fast = process.env.FAST === "1";
 const basePrompt = process.argv[2] ?? "Plan a one-day cycling trip from Amsterdam";
 const prompt = fast ? `${basePrompt}\n\n${FAST_MODE_INSTRUCTION}` : basePrompt;
+
+// Optional image input (IMAGE=path/to/photo.jpg) — exercises the multimodal path.
+const MIME: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+const images = process.env.IMAGE
+  ? [{
+      type: "image" as const,
+      data: fs.readFileSync(path.resolve(process.env.IMAGE)).toString("base64"),
+      mimeType: MIME[path.extname(process.env.IMAGE).toLowerCase()] ?? "image/jpeg",
+    }]
+  : undefined;
+if (images) console.error(`Image attached: ${process.env.IMAGE}`);
 
 const session = await createVeloGuideSession();
 
@@ -66,7 +80,7 @@ session.subscribe((event: any) => {
 
 console.error(`\nPrompt: ${prompt}\n`);
 const t0 = Date.now();
-await session.prompt(prompt);
+await session.prompt(prompt, { images });
 let reprompted = false;
 if (text.length < 20) {
   reprompted = true;

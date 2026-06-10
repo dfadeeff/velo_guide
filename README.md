@@ -126,8 +126,10 @@ make smoke   # One real headless agent turn with tool/latency trace + grounding 
 make eval    # Run the eval suite (backend/eval/test-cases.json) with a pass/fail scorecard
 ```
 
-`make smoke` accepts a custom prompt and an optional follow-up turn:
+`make smoke` accepts a custom prompt, an optional follow-up turn (multi-turn
+refinement check), and an optional image (multimodal check):
 
 ```bash
 cd backend && npx tsx src/smoke.ts "Plan a 2-day trip from Utrecht" "make day 2 shorter"
+cd backend && IMAGE=eval/fixtures/dutch-windmill.jpg npx tsx src/smoke.ts "I want to cycle somewhere that looks like this"
 ```

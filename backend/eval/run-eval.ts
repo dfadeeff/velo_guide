@@ -31,6 +31,19 @@ interface TestCase {
   input: string;
   expected_tools: string[];
   assertions: string[];
+  image?: string; // path relative to eval/ — sent as multimodal input
+  reply_must_match?: string; // regex the reply must satisfy (case-insensitive)
+}
+
+const MIME: Record<string, string> = { ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp" };
+
+function loadImage(relPath: string) {
+  const abs = path.resolve(__dirname, relPath);
+  return {
+    type: "image" as const,
+    data: fs.readFileSync(abs).toString("base64"),
+    mimeType: MIME[path.extname(abs).toLowerCase()] ?? "image/jpeg",
+  };
 }
 
 interface Check {
@@ -80,11 +93,12 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
 
   const t0 = Date.now();
   const prompt = fast ? `${tc.input}\n\n${FAST_MODE_INSTRUCTION}` : tc.input;
+  const images = tc.image ? [loadImage(tc.image)] : undefined;
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error(`case timed out after ${CASE_TIMEOUT_MS / 1000}s`)), CASE_TIMEOUT_MS),
   );
   try {
-    await Promise.race([session.prompt(prompt), timeout]);
+    await Promise.race([session.prompt(prompt, { images }), timeout]);
     if (text.length < 20) {
       // Same empty-turn backstop the server uses.
       await Promise.race([
@@ -127,6 +141,15 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
     detail: `${text.trim().length} chars`,
   });
 
+  // 2b. Case-specific content requirement (e.g. image comprehension proxy).
+  if (tc.reply_must_match) {
+    const re = new RegExp(tc.reply_must_match, "i");
+    checks.push({
+      name: `reply matches /${tc.reply_must_match}/i`,
+      status: re.test(text) ? "pass" : "fail",
+    });
+  }
+
   // 3. No fabricated knooppunten sequence ("12 → 45 → 63").
   const fabricated = /\d+\s*(?:→|->)\s*\d+\s*(?:→|->)\s*\d+/.test(text);
   checks.push({ name: "no fabricated junction sequence", status: fabricated ? "fail" : "pass" });
@@ -166,13 +189,24 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
 
   // 6. Day-header distances ("Day 1: … | 48.4 km") must match a plan_route
   //    distance within 2% / 0.5 km — catches estimated-not-computed distances.
+  //    A day may legitimately be the SUM of several routed legs (e.g. three
+  //    16+23+27 km segments presented as one 67 km day), so accept any sum of
+  //    consecutive plan_route results too.
   const claimedKm = [...text.matchAll(/\|\s*~?([\d.]+)\s*km/g)].map((m) => parseFloat(m[1]));
   const routedKm = [...(toolOutputs["plan_route"] ?? "").matchAll(/distance_km\\?":\s*\\?"([\d.]+)/g)].map((m) =>
     parseFloat(m[1]),
   );
+  const routedSums: number[] = [];
+  for (let i = 0; i < routedKm.length; i++) {
+    let sum = 0;
+    for (let j = i; j < routedKm.length; j++) {
+      sum += routedKm[j];
+      routedSums.push(sum);
+    }
+  }
   if (claimedKm.length && routedKm.length) {
     const ungrounded = claimedKm.filter(
-      (c) => !routedKm.some((r) => Math.abs(c - r) <= Math.max(0.5, r * 0.02)),
+      (c) => !routedSums.some((r) => Math.abs(c - r) <= Math.max(0.5, r * 0.02)),
     );
     checks.push({
       name: "day distances match plan_route",

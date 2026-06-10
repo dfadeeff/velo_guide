@@ -83,6 +83,7 @@ Does the output demonstrate genuine Netherlands cycling knowledge?
 ### Scenario 4: Image Input
 **Input**: Photo of a Dutch landscape + "I want to cycle somewhere that looks like this"
 **Expected**: Agent describes the image, identifies landscape type, suggests matching region.
+**Automated**: the `image-input` eval case sends a CC0 Kinderdijk windmill photo (`backend/eval/fixtures/`) through the multimodal path and checks the reply identifies the windmill/polder landscape and plans a grounded route to a matching region.
 
 ### Scenario 5: Unreasonable Request
 **Input**: "I want to cycle 200 km in one day, I'm a casual cyclist"
@@ -109,11 +110,17 @@ session and scores it programmatically (exit code is CI-usable). Per case it che
 5. **Day distances match `plan_route`** within 2% — catches estimated-not-computed numbers
 6. **Latency** per case is reported (target: <30s with a local Overpass)
 
+The suite also covers **multimodal input** (the `image-input` case sends a real
+windmill photo and checks the reply identifies the landscape — see Scenario 4)
+and per-case **`reply_must_match`** content assertions.
+
 Run a single case with `CASE=basic-day-trip make eval`; `FAST=0` evaluates the
 detailed (non-fast) mode. The judgment-call assertions in `test-cases.json`
 (e.g. "beginner-friendly advice is given") are printed alongside each case for
 manual review. `make smoke` runs one ad-hoc prompt with the same checks plus a
-timestamped latency trace.
+timestamped latency trace; it also exercises **multi-turn refinement** (second
+CLI arg = a follow-up turn; reports whether the agent adjusted with few tool
+calls or re-asked/re-planned) and **image input** (`IMAGE=eval/fixtures/dutch-windmill.jpg`).
 
 ### Future automation
 
