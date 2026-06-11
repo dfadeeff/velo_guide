@@ -1,5 +1,6 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { textResult } from "../utils/tool-result.js";
 
 const OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast";
 
@@ -27,7 +28,7 @@ const WEATHER_CODES: Record<number, string> = {
   99: "Thunderstorm with heavy hail",
 };
 
-export const getWeatherTool: ToolDefinition = {
+export const getWeatherTool = defineTool({
   name: "get_weather",
   label: "Get Weather Forecast",
   description:
@@ -38,22 +39,16 @@ export const getWeatherTool: ToolDefinition = {
     start_date: Type.String({ description: "Start date (YYYY-MM-DD)" }),
     end_date: Type.String({ description: "End date (YYYY-MM-DD)" }),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     const today = new Date();
     const start = new Date(params.start_date);
     const maxForecast = new Date(today);
     maxForecast.setDate(maxForecast.getDate() + 16);
 
     if (start > maxForecast) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Weather forecasts are only available for the next 16 days (until ${maxForecast.toISOString().split("T")[0]}). The requested date ${params.start_date} is too far ahead. Plan the route and POIs now, and advise the user to check weather closer to their trip date.`,
-          },
-        ],
-        details: {},
-      };
+      return textResult(
+        `Weather forecasts are only available for the next 16 days (until ${maxForecast.toISOString().split("T")[0]}). The requested date ${params.start_date} is too far ahead. Plan the route and POIs now, and advise the user to check weather closer to their trip date.`,
+      );
     }
 
     // A range that straddles the horizon (start inside, end beyond) would get a
@@ -87,20 +82,14 @@ export const getWeatherTool: ToolDefinition = {
     const res = await fetch(url.toString());
 
     if (!res.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Weather API error: ${res.status} ${res.statusText}` }],
-        details: {},
-      };
+      return textResult(`Weather API error: ${res.status} ${res.statusText}`);
     }
 
     const data = await res.json();
     const daily = data.daily;
 
     if (!daily?.time?.length) {
-      return {
-        content: [{ type: "text" as const, text: "No weather data available for the requested dates." }],
-        details: {},
-      };
+      return textResult("No weather data available for the requested dates.");
     }
 
     const forecast = daily.time.map((date: string, i: number) => ({
@@ -116,9 +105,6 @@ export const getWeatherTool: ToolDefinition = {
       sunset: daily.sunset[i],
     }));
 
-    return {
-      content: [{ type: "text" as const, text: clampNote + JSON.stringify(forecast, null, 2) }],
-      details: {},
-    };
+    return textResult(clampNote + JSON.stringify(forecast, null, 2));
   },
-};
+});

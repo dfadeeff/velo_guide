@@ -1,7 +1,8 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import { queryOverpass, buildBbox } from "../utils/overpass.js";
 import { haversineDistance } from "../utils/format.js";
+import { textResult, jsonResult } from "../utils/tool-result.js";
 
 const ACCOMMODATION_TYPES: Record<string, string> = {
   hotel: 'node["tourism"="hotel"]',
@@ -12,7 +13,7 @@ const ACCOMMODATION_TYPES: Record<string, string> = {
   motel: 'node["tourism"="motel"]',
 };
 
-export const findAccommodationTool: ToolDefinition = {
+export const findAccommodationTool = defineTool({
   name: "find_accommodation",
   label: "Find Accommodation",
   description:
@@ -32,18 +33,14 @@ export const findAccommodationTool: ToolDefinition = {
       }),
     ),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     const radius = params.radius_m || 5000;
     const types = params.types?.length ? params.types : Object.keys(ACCOMMODATION_TYPES);
     const bbox = buildBbox(params.lat, params.lon, radius);
 
-    const filters = types
-      .filter((t: string) => ACCOMMODATION_TYPES[t])
-      .map((t: string) => `${ACCOMMODATION_TYPES[t]}(${bbox});`);
-
-    const wayFilters = types
-      .filter((t: string) => ACCOMMODATION_TYPES[t])
-      .map((t: string) => `way["tourism"="${t}"](${bbox});`);
+    const validTypes = types.filter((t) => ACCOMMODATION_TYPES[t]);
+    const filters = validTypes.map((t) => `${ACCOMMODATION_TYPES[t]}(${bbox});`);
+    const wayFilters = validTypes.map((t) => `way["tourism"="${t}"](${bbox});`);
 
     const query = `[out:json][timeout:15];(${filters.join("")}${wayFilters.join("")});out center 30;`;
 
@@ -71,26 +68,14 @@ export const findAccommodationTool: ToolDefinition = {
         .slice(0, 15);
 
       if (!accommodations.length) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No accommodation found within ${radius}m of (${params.lat}, ${params.lon}). Try increasing the search radius or searching a nearby town.`,
-            },
-          ],
-          details: {},
-        };
+        return textResult(
+          `No accommodation found within ${radius}m of (${params.lat}, ${params.lon}). Try increasing the search radius or searching a nearby town.`,
+        );
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(accommodations, null, 2) }],
-        details: {},
-      };
+      return jsonResult(accommodations);
     } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Overpass API error: ${err.message}` }],
-        details: {},
-      };
+      return textResult(`Overpass API error: ${err.message}`);
     }
   },
-};
+});

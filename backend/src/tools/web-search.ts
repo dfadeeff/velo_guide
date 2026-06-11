@@ -1,5 +1,6 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { textResult } from "../utils/tool-result.js";
 
 // NOTE: DuckDuckGo's Instant Answer API has shallow coverage and returns
 // nothing for most real queries (events, ferry schedules, seasonal info). It is
@@ -8,7 +9,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 // the lite.duckduckgo.com HTML page: it was slow (no timeout), fragile, against
 // ToS, and still returned nothing useful — which made the agent burn ~8s per
 // call and retry repeatedly.
-export const webSearchTool: ToolDefinition = {
+export const webSearchTool = defineTool({
   name: "web_search",
   label: "Web Search",
   description:
@@ -18,7 +19,7 @@ export const webSearchTool: ToolDefinition = {
       description: "Search query. Add 'Netherlands' or 'cycling' for more relevant results.",
     }),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     try {
       const res = await fetch(
         `https://api.duckduckgo.com/?q=${encodeURIComponent(params.query)}&format=json&no_html=1&skip_disambig=1`,
@@ -26,7 +27,7 @@ export const webSearchTool: ToolDefinition = {
       );
 
       if (!res.ok) {
-        return { content: [{ type: "text" as const, text: `Search unavailable (${res.status}).` }], details: {} };
+        return textResult(`Search unavailable (${res.status}).`);
       }
 
       const data = await res.json();
@@ -45,28 +46,14 @@ export const webSearchTool: ToolDefinition = {
       }
 
       if (!results.length) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No results for "${params.query}". Web search has limited coverage — proceed using your own knowledge and the other tools; do not retry this search.`,
-            },
-          ],
-          details: {},
-        };
+        return textResult(
+          `No results for "${params.query}". Web search has limited coverage — proceed using your own knowledge and the other tools; do not retry this search.`,
+        );
       }
 
-      return {
-        content: [{ type: "text" as const, text: `Search results for "${params.query}":\n\n${results.join("\n")}` }],
-        details: {},
-      };
+      return textResult(`Search results for "${params.query}":\n\n${results.join("\n")}`);
     } catch (err: any) {
-      return {
-        content: [
-          { type: "text" as const, text: `Search unavailable (${err.message}). Proceed without it; do not retry.` },
-        ],
-        details: {},
-      };
+      return textResult(`Search unavailable (${err.message}). Proceed without it; do not retry.`);
     }
   },
-};
+});

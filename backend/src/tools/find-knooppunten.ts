@@ -1,9 +1,10 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import { queryOverpass, buildBbox } from "../utils/overpass.js";
 import { haversineDistance } from "../utils/format.js";
+import { textResult, jsonResult } from "../utils/tool-result.js";
 
-export const findKnooppuntenTool: ToolDefinition = {
+export const findKnooppuntenTool = defineTool({
   name: "find_knooppunten",
   label: "Find Cycling Junctions (Knooppunten)",
   description:
@@ -18,7 +19,7 @@ export const findKnooppuntenTool: ToolDefinition = {
       }),
     ),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     const radius = params.radius_m || 10000;
     const bbox = buildBbox(params.lat, params.lon, radius);
 
@@ -40,37 +41,18 @@ export const findKnooppuntenTool: ToolDefinition = {
         .slice(0, 15);
 
       if (!junctions.length) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No knooppunten found within ${radius}m of (${params.lat}, ${params.lon}). The knooppunten network may not cover this area, or try a larger radius.`,
-            },
-          ],
-          details: {},
-        };
+        return textResult(
+          `No knooppunten found within ${radius}m of (${params.lat}, ${params.lon}). The knooppunten network may not cover this area, or try a larger radius.`,
+        );
       }
 
-      const result = {
+      return jsonResult({
         note: "These are knooppunten NEAR the given point, sorted by distance. This is a proximity list, not a connected route — adjacency between junctions is unknown. Mention these as 'knooppunten in the area' or 'near this segment'; do NOT invent an ordered sequence.",
         count: junctions.length,
         junctions,
-      };
-
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
-        details: {},
-      };
+      });
     } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Overpass API error: ${err.message}` }],
-        details: {},
-      };
+      return textResult(`Overpass API error: ${err.message}`);
     }
   },
-};
+});

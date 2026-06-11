@@ -2,6 +2,7 @@ import express from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import path from "path";
 import { fileURLToPath } from "url";
+import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createVeloGuideSession, DEFAULT_MODEL } from "./agent.js";
 import { FAST_MODE_INSTRUCTION } from "./system-prompt.js";
 
@@ -54,7 +55,7 @@ export function startServer(port: number, host: string) {
     try {
       session = await createVeloGuideSession();
 
-      session.subscribe((event: any) => {
+      session.subscribe((event: AgentSessionEvent) => {
         if (ws.readyState !== WebSocket.OPEN) return;
 
         if (event.type === "message_update") {
@@ -75,16 +76,13 @@ export function startServer(port: number, host: string) {
           ws.send(JSON.stringify({ type: "reset" }));
           ws.send(JSON.stringify({
             type: "tool_start",
-            name: (event as any).toolName ?? "unknown",
-            label: (event as any).toolName ?? "unknown",
+            name: event.toolName,
+            label: event.toolName,
           }));
         }
 
         if (event.type === "tool_execution_end") {
-          ws.send(JSON.stringify({
-            type: "tool_end",
-            name: (event as any).toolName ?? "unknown",
-          }));
+          ws.send(JSON.stringify({ type: "tool_end", name: event.toolName }));
         }
       });
 

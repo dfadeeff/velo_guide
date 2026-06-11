@@ -24,6 +24,7 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 const { createVeloGuideSession } = await import("../src/agent.js");
 const { FAST_MODE_INSTRUCTION } = await import("../src/system-prompt.js");
+type AgentSessionEvent = import("@earendil-works/pi-coding-agent").AgentSessionEvent;
 
 interface TestCase {
   id: string;
@@ -77,16 +78,16 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
   const toolOutputs: Record<string, string> = {};
   let text = "";
 
-  session.subscribe((event: any) => {
+  session.subscribe((event: AgentSessionEvent) => {
     if (event.type === "tool_execution_start") {
-      toolCalls.push(event.toolName ?? "unknown");
+      toolCalls.push(event.toolName);
       text = ""; // mirror the server-side narration strip
     }
     if (event.type === "tool_execution_end") {
-      const out = JSON.stringify(event.result ?? event.output ?? "");
+      const out = JSON.stringify(event.result ?? "");
       toolOutputs[event.toolName] = (toolOutputs[event.toolName] ?? "") + out;
     }
-    if (event.type === "message_update" && event.assistantMessageEvent?.type === "text_delta") {
+    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
       text += event.assistantMessageEvent.delta;
     }
   });

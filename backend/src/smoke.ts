@@ -17,6 +17,7 @@ if (!process.env.OPENROUTER_API_KEY) {
 
 const { createVeloGuideSession } = await import("./agent.js");
 const { FAST_MODE_INSTRUCTION } = await import("./system-prompt.js");
+type AgentSessionEvent = import("@earendil-works/pi-coding-agent").AgentSessionEvent;
 
 const fast = process.env.FAST === "1";
 const basePrompt = process.argv[2] ?? "Plan a one-day cycling trip from Amsterdam";
@@ -40,36 +41,35 @@ const eventCounts: Record<string, number> = {};
 let text = "";
 const tStart = Date.now();
 
-session.subscribe((event: any) => {
+session.subscribe((event: AgentSessionEvent) => {
   eventCounts[event.type] = (eventCounts[event.type] ?? 0) + 1;
   // Log every non-delta event with a timestamp to expose dead gaps (retries,
   // compaction, etc.) between visible actions.
   if (event.type !== "message_update") {
-    const a = event.assistantMessageEvent?.type ? `:${event.assistantMessageEvent.type}` : "";
-    process.stderr.write(`  · [t+${((Date.now() - tStart) / 1000).toFixed(0)}s] ${event.type}${a}\n`);
+    process.stderr.write(`  · [t+${((Date.now() - tStart) / 1000).toFixed(0)}s] ${event.type}\n`);
   }
   if (event.type === "tool_execution_start") {
-    toolCalls.push(event.toolName ?? "unknown");
+    toolCalls.push(event.toolName);
     // Mirror the server-side narration strip: text before a tool is preamble.
     text = "";
     process.stderr.write(`  → [t+${((Date.now() - t0) / 1000).toFixed(0)}s] tool: ${event.toolName}\n`);
   }
   if (event.type === "tool_execution_end") {
-    const r = JSON.stringify((event as any).result ?? (event as any).output ?? "").slice(0, 90);
+    const r = JSON.stringify(event.result ?? "").slice(0, 90);
     process.stderr.write(`     ✓ ${event.toolName} -> ${r}\n`);
   }
   if (event.type === "message_update") {
     const a = event.assistantMessageEvent;
-    if (a?.type === "text_delta") text += a.delta;
-    if (a?.type === "done") {
-      const content = a.message?.content;
+    if (a.type === "text_delta") text += a.delta;
+    if (a.type === "done") {
+      const content = a.message.content;
       const msgText = typeof content === "string"
         ? content
         : (content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("");
       process.stderr.write(`  ⟫ done reason=${a.reason} textLen=${msgText.length}\n`);
       if (!text && msgText) text = msgText;
     }
-    if (a?.type === "error") {
+    if (a.type === "error") {
       process.stderr.write(`  !! msg error reason=${a.reason}: ${JSON.stringify(a.error).slice(0, 200)}\n`);
     }
   }

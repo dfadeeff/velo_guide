@@ -34,9 +34,38 @@ function stopTimer() {
   timerEl.classList.remove("running");
 }
 
+// Encapsulates one in-progress assistant reply: the element it renders into
+// and the raw markdown accumulated so far. Replaces shared mutable globals so
+// no other code can touch a half-streamed message.
+class StreamingMessage {
+  #el;
+  #raw = "";
+
+  constructor(contentEl) {
+    this.#el = contentEl;
+  }
+
+  append(delta) {
+    this.#raw += delta;
+    this.#el.innerHTML = renderMarkdown(this.#raw);
+    scrollToBottom();
+  }
+
+  // Server signals that prior streamed text was planning preamble — discard it.
+  reset() {
+    this.#raw = "";
+    this.#el.innerHTML = "";
+  }
+
+  finalize() {
+    this.#el.innerHTML = renderMarkdown(this.#raw);
+    scrollToBottom();
+  }
+}
+
 let ws = null;
 let pendingImages = [];
-let currentAssistantMsg = null;
+let streamingMsg = null; // StreamingMessage while a reply is in flight
 let isStreaming = false;
 let activeTools = new Set();
 let hadSession = false; // a "ready" was received before — any later "ready" is a reconnect
@@ -87,25 +116,18 @@ function handleMessage(msg) {
     case "response_start":
       isStreaming = true;
       setStatus("thinking", "Thinking...");
-      currentAssistantMsg = addMessage("assistant", "");
+      streamingMsg = new StreamingMessage(addMessage("assistant", ""));
       activeTools.clear();
       toolStatus.innerHTML = "";
       startTimer();
       break;
 
     case "delta":
-      if (currentAssistantMsg) {
-        appendDelta(currentAssistantMsg, msg.text);
-      }
+      streamingMsg?.append(msg.text);
       break;
 
     case "reset":
-      // Server signals that prior streamed text was planning preamble — discard
-      // it so only the final itinerary (after the last tool) is shown.
-      if (currentAssistantMsg) {
-        rawText = "";
-        currentAssistantMsg.innerHTML = "";
-      }
+      streamingMsg?.reset();
       break;
 
     case "tool_start":
@@ -129,10 +151,8 @@ function handleMessage(msg) {
       sendBtn.disabled = false;
       activeTools.clear();
       toolStatus.innerHTML = "";
-      if (currentAssistantMsg) {
-        finalizeMessage(currentAssistantMsg);
-      }
-      currentAssistantMsg = null;
+      streamingMsg?.finalize();
+      streamingMsg = null;
       break;
 
     case "error":
@@ -144,8 +164,6 @@ function handleMessage(msg) {
       break;
   }
 }
-
-let rawText = "";
 
 function addSystemNote(text) {
   const wrapper = document.createElement("div");
@@ -167,7 +185,6 @@ function addMessage(role, text) {
   chat.appendChild(wrapper);
 
   if (role === "assistant") {
-    rawText = text;
     content.innerHTML = text ? renderMarkdown(text) : "";
   } else {
     content.textContent = text;
@@ -175,18 +192,6 @@ function addMessage(role, text) {
 
   scrollToBottom();
   return content;
-}
-
-function appendDelta(el, delta) {
-  rawText += delta;
-  el.innerHTML = renderMarkdown(rawText);
-  scrollToBottom();
-}
-
-function finalizeMessage(el) {
-  el.innerHTML = renderMarkdown(rawText);
-  rawText = "";
-  scrollToBottom();
 }
 
 function renderMarkdown(text) {
@@ -302,5 +307,68 @@ imageInput.addEventListener("change", () => {
   }
   imageInput.value = "";
 });
+
+// Voice input — browser-side speech-to-text via the Web Speech API
+// (Chrome/Edge/Safari). The transcript lands in the text box and is sent as a
+// normal text prompt, so the backend stays text+image only and every grounding
+// rule applies unchanged. The button hides itself where the API is unsupported
+// (e.g. Firefox); typing always works.
+class VoiceInput {
+  #recognition;
+  #button;
+  #textarea;
+  #baseText = "";
+  #active = false;
+
+  constructor(button, textarea) {
+    const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) {
+      button.style.display = "none";
+      return;
+    }
+    this.#button = button;
+    this.#textarea = textarea;
+    this.#recognition = new SpeechRecognitionImpl();
+    this.#recognition.lang = navigator.language || "en-US";
+    this.#recognition.interimResults = true;
+    this.#recognition.continuous = false;
+
+    this.#recognition.onresult = (e) => {
+      let transcript = "";
+      for (const result of e.results) transcript += result[0].transcript;
+      this.#textarea.value = `${this.#baseText} ${transcript}`.trim();
+      this.#textarea.dispatchEvent(new Event("input")); // re-run autosize
+    };
+    this.#recognition.onend = () => this.#setActive(false);
+    this.#recognition.onerror = () => this.#setActive(false);
+
+    button.addEventListener("click", () => this.#toggle());
+  }
+
+  #toggle() {
+    if (this.#active) {
+      this.#recognition.stop();
+      this.#setActive(false);
+      return;
+    }
+    this.#baseText = this.#textarea.value;
+    try {
+      this.#recognition.start();
+      this.#setActive(true);
+    } catch {
+      this.#setActive(false);
+    }
+  }
+
+  #setActive(on) {
+    this.#active = on;
+    this.#button.classList.toggle("recording", on);
+    this.#button.title = on
+      ? "Listening… click to stop"
+      : "Voice input — speech is transcribed in your browser and sent as text";
+  }
+}
+
+new VoiceInput(document.getElementById("mic-btn"), input);
 
 connect();

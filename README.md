@@ -2,6 +2,10 @@
 
 AI-powered system for planning 1–3 day cycling trips in the Netherlands, built on the [pi-agent](https://github.com/earendil-works/pi) framework.
 
+**Input:** text, images (photo of a place you'd like to visit), and voice (browser speech-to-text, Chrome/Edge/Safari). **Output:** a grounded, multi-day itinerary; refine it across turns ("make day 2 shorter").
+
+**Docs:** [DECISIONS.md](DECISIONS.md) (one-page decisions/assumptions/limitations/scaling) · [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) · [EVALUATION.md](EVALUATION.md) (quality evaluation plan)
+
 ## Prerequisites
 
 - **Node.js 22+** — [nodejs.org](https://nodejs.org/)
@@ -100,6 +104,9 @@ Browser (chat) ←WebSocket→ Express server ←SDK→ pi-agent session
 velo_guide/
 ├── Makefile
 ├── .env.example
+├── DECISIONS.md                 # 1-page: decisions, assumptions, limitations, scaling
+├── ARCHITECTURE.md              # Deep-dive: agent loop, latency engineering, LLM-issue table
+├── EVALUATION.md                # Quality evaluation plan (make eval runs the automated half)
 ├── backend/
 │   ├── package.json
 │   ├── tsconfig.json

@@ -1,7 +1,8 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import { queryOverpass, buildBbox } from "../utils/overpass.js";
 import { haversineDistance } from "../utils/format.js";
+import { textResult, jsonResult } from "../utils/tool-result.js";
 
 const CATEGORY_MAP: Record<string, string> = {
   cafe: 'node["amenity"="cafe"]',
@@ -19,7 +20,7 @@ const CATEGORY_MAP: Record<string, string> = {
   church: 'node["amenity"="place_of_worship"]["building"="church"]',
 };
 
-export const findPoisTool: ToolDefinition = {
+export const findPoisTool = defineTool({
   name: "find_pois",
   label: "Find Points of Interest",
   description: `Find points of interest near a location. Available categories: ${Object.keys(CATEGORY_MAP).join(", ")}. Returns name, type, coordinates, and distance from the search point. Use this to find cafes, restaurants, attractions, and practical stops along a cycling route.`,
@@ -36,24 +37,16 @@ export const findPoisTool: ToolDefinition = {
       description: `Categories to search. Options: ${Object.keys(CATEGORY_MAP).join(", ")}`,
     }),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     const radius = params.radius_m || 2000;
     const bbox = buildBbox(params.lat, params.lon, radius);
 
     const filters = params.categories
-      .filter((c: string) => CATEGORY_MAP[c])
-      .map((c: string) => `${CATEGORY_MAP[c]}(${bbox});`);
+      .filter((c) => CATEGORY_MAP[c])
+      .map((c) => `${CATEGORY_MAP[c]}(${bbox});`);
 
     if (!filters.length) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `No valid categories provided. Available: ${Object.keys(CATEGORY_MAP).join(", ")}`,
-          },
-        ],
-        details: {},
-      };
+      return textResult(`No valid categories provided. Available: ${Object.keys(CATEGORY_MAP).join(", ")}`);
     }
 
     const query = `[out:json][timeout:15];(${filters.join("")});out center 60;`;
@@ -82,26 +75,14 @@ export const findPoisTool: ToolDefinition = {
         .slice(0, 10);
 
       if (!pois.length) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `No POIs found for categories [${params.categories.join(", ")}] within ${radius}m of (${params.lat}, ${params.lon}).`,
-            },
-          ],
-          details: {},
-        };
+        return textResult(
+          `No POIs found for categories [${params.categories.join(", ")}] within ${radius}m of (${params.lat}, ${params.lon}).`,
+        );
       }
 
-      return {
-        content: [{ type: "text" as const, text: JSON.stringify(pois, null, 2) }],
-        details: {},
-      };
+      return jsonResult(pois);
     } catch (err: any) {
-      return {
-        content: [{ type: "text" as const, text: `Overpass API error: ${err.message}` }],
-        details: {},
-      };
+      return textResult(`Overpass API error: ${err.message}`);
     }
   },
-};
+});

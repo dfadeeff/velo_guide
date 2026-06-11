@@ -39,7 +39,7 @@
       <div class="message assistant">
         <div class="message-content">
           <p>Welcome! I'm VeloGuide, your AI cycling trip planner for the Netherlands. I can help you plan 1-3 day cycling trips with real routes, weather forecasts, points of interest, and the famous Dutch knooppunten (junction network).</p>
-          <p>Tell me where you'd like to cycle, when, and what you enjoy - or upload a photo of a place you'd like to visit!</p>
+          <p>Tell me where you'd like to cycle, when, and what you enjoy — type it, say it with the 🎤 button, or upload a photo of a place you'd like to visit!</p>
         </div>
       </div>
     </div>
@@ -55,6 +55,13 @@
           </svg>
           <input type="file" id="image-input" accept="image/*" multiple hidden>
         </label>
+        <button type="button" class="upload-btn" id="mic-btn" title="Voice input — speech is transcribed in your browser and sent as text">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+            <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
         <label class="fast-toggle" id="fast-toggle" title="Fast mode (default): quicker, more compact plans. Uncheck for a fuller, detailed itinerary.">
           <input type="checkbox" id="fast-checkbox" checked>
           <span>⚡ Fast</span>

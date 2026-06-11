@@ -1,8 +1,10 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
+import { textResult, jsonResult } from "../utils/tool-result.js";
 
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 
+// Nominatim usage policy: max 1 request/second per client.
 let lastRequestTime = 0;
 
 async function rateLimitedFetch(url: string): Promise<Response> {
@@ -17,7 +19,7 @@ async function rateLimitedFetch(url: string): Promise<Response> {
   });
 }
 
-export const geocodeTool: ToolDefinition = {
+export const geocodeTool = defineTool({
   name: "geocode",
   label: "Geocode Location",
   description:
@@ -25,24 +27,18 @@ export const geocodeTool: ToolDefinition = {
   parameters: Type.Object({
     query: Type.String({ description: "Place name to geocode, e.g. 'Amsterdam', 'Kinderdijk', 'Hoge Veluwe'" }),
   }),
-  execute: async (_toolCallId, params: any) => {
+  execute: async (_toolCallId, params) => {
     const url = `${NOMINATIM_URL}?format=json&countrycodes=NL&limit=3&q=${encodeURIComponent(params.query)}`;
     const res = await rateLimitedFetch(url);
 
     if (!res.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Geocoding error: ${res.status} ${res.statusText}` }],
-        details: {},
-      };
+      return textResult(`Geocoding error: ${res.status} ${res.statusText}`);
     }
 
     const results = await res.json();
 
     if (!results.length) {
-      return {
-        content: [{ type: "text" as const, text: `No results found for "${params.query}" in the Netherlands.` }],
-        details: {},
-      };
+      return textResult(`No results found for "${params.query}" in the Netherlands.`);
     }
 
     const formatted = results.map((r: any) => ({
@@ -52,9 +48,6 @@ export const geocodeTool: ToolDefinition = {
       type: r.type,
     }));
 
-    return {
-      content: [{ type: "text" as const, text: JSON.stringify(formatted, null, 2) }],
-      details: {},
-    };
+    return jsonResult(formatted);
   },
-};
+});

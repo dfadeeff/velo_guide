@@ -112,7 +112,10 @@ session and scores it programmatically (exit code is CI-usable). Per case it che
 
 The suite also covers **multimodal input** (the `image-input` case sends a real
 windmill photo and checks the reply identifies the landscape — see Scenario 4)
-and per-case **`reply_must_match`** content assertions.
+and per-case **`reply_must_match`** content assertions. **Voice input** is
+transcribed to text in the browser before it reaches the agent, so every text
+check above covers the voice path; the browser-side recognition itself is
+verified manually (mic button, Chrome/Edge/Safari).
 
 Run a single case with `CASE=basic-day-trip make eval`; `FAST=0` evaluates the
 detailed (non-fast) mode. The judgment-call assertions in `test-cases.json`

@@ -1,6 +1,7 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import { formatDuration, formatDistance, cardinalBearing } from "../utils/format.js";
+import { textResult, jsonResult } from "../utils/tool-result.js";
 
 // OpenRouteService routes on the actual cycling network (Dutch fietspaden) and
 // returns elevation + human-readable turn instructions. It needs a valid
@@ -15,6 +16,8 @@ const OSRM_URL = "https://router.project-osrm.org/route/v1/bike";
 // accounts for wind, stops, and town crossings; e-bikes are a bit faster, which
 // the model notes in the narrative.
 const CYCLING_SPEED_KMH = 18;
+
+type Coordinate = { lon: number; lat: number };
 
 interface RouteResult {
   source: string;
@@ -31,7 +34,7 @@ interface RouteResult {
   instructions?: Array<{ instruction: string; distance: string; name?: string }>;
 }
 
-function legBearings(coords: Array<{ lon: number; lat: number }>): string[] {
+function legBearings(coords: Coordinate[]): string[] {
   const legs: string[] = [];
   for (let i = 0; i < coords.length - 1; i++) {
     const a = coords[i];
@@ -41,7 +44,7 @@ function legBearings(coords: Array<{ lon: number; lat: number }>): string[] {
   return legs;
 }
 
-async function planWithORS(coords: Array<{ lon: number; lat: number }>): Promise<RouteResult> {
+async function planWithORS(coords: Coordinate[]): Promise<RouteResult> {
   const res = await fetch(ORS_URL, {
     method: "POST",
     headers: {
@@ -86,7 +89,7 @@ async function planWithORS(coords: Array<{ lon: number; lat: number }>): Promise
   };
 }
 
-async function planWithOSRM(coords: Array<{ lon: number; lat: number }>): Promise<RouteResult> {
+async function planWithOSRM(coords: Coordinate[]): Promise<RouteResult> {
   const coordStr = coords.map((p) => `${p.lon},${p.lat}`).join(";");
   const url = `${OSRM_URL}/${coordStr}?overview=false&steps=true&annotations=distance,duration`;
 
@@ -131,7 +134,7 @@ async function planWithOSRM(coords: Array<{ lon: number; lat: number }>): Promis
   };
 }
 
-export const planRouteTool: ToolDefinition = {
+export const planRouteTool = defineTool({
   name: "plan_route",
   label: "Plan Cycling Route",
   description:
@@ -145,35 +148,27 @@ export const planRouteTool: ToolDefinition = {
       { description: "Waypoints in order [start, ...via, end]. Minimum 2 points.", minItems: 2 },
     ),
   }),
-  execute: async (_toolCallId, params: any) => {
-    const coords = params.coordinates as Array<{ lon: number; lat: number }>;
+  execute: async (_toolCallId, params) => {
+    const coords = params.coordinates;
     const errors: string[] = [];
 
     // Prefer ORS (cycling-network + elevation) when a key is configured; fall
     // back to OSRM so routing always works even without/with an invalid key.
     if (process.env.ORS_API_KEY) {
       try {
-        const result = await planWithORS(coords);
-        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], details: {} };
+        return jsonResult(await planWithORS(coords));
       } catch (err: any) {
         errors.push(`ORS failed (${err.message}); fell back to OSRM.`);
       }
     }
 
     try {
-      const result = await planWithOSRM(coords);
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], details: {} };
+      return jsonResult(await planWithOSRM(coords));
     } catch (err: any) {
       errors.push(`OSRM failed (${err.message}).`);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Could not compute a route. ${errors.join(" ")} This may mean no cycling route exists between these points (e.g. a water crossing without a ferry).`,
-          },
-        ],
-        details: {},
-      };
+      return textResult(
+        `Could not compute a route. ${errors.join(" ")} This may mean no cycling route exists between these points (e.g. a water crossing without a ferry).`,
+      );
     }
   },
-};
+});
