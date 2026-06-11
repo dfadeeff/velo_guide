@@ -26,6 +26,7 @@ import {
 } from "../src/intake.js";
 import { veloGuideTools } from "../src/tools/index.js";
 import { FeedbackSubmissionSchema, normalizeSubmission, openFeedbackStore } from "../src/feedback.js";
+import { detectZigzags, straightLineFloor, ungroundedEndpoints, verifyRoute } from "../src/utils/geo-sanity.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -227,6 +228,61 @@ test("exactly 7 tools, complete and uniquely named", () => {
     assert.ok(tool.parameters, `${tool.name}: missing parameter schema`);
     assert.equal(typeof tool.execute, "function", `${tool.name}: missing execute`);
   }
+});
+
+// Real Dutch coordinates used across the geo-sanity tests.
+const PLACES = {
+  amsterdam: { lat: 52.3676, lon: 4.9041 },
+  monnickendam: { lat: 52.459, lon: 5.0386 },
+  marken: { lat: 52.4589, lon: 5.1039 },
+  volendam: { lat: 52.4942, lon: 5.0747 },
+  edam: { lat: 52.5132, lon: 5.0457 },
+  purmerend: { lat: 52.505, lon: 4.9595 },
+  enkhuizen: { lat: 52.7042, lon: 5.291 },
+};
+
+test("geo-sanity: straight-line floor flags geometrically impossible days", () => {
+  // Amsterdam→Enkhuizen great-circle is ~45 km; you cannot cycle it in less.
+  const wp = [PLACES.amsterdam, PLACES.enkhuizen];
+  const { floorKm, ok } = straightLineFloor(wp);
+  assert.ok(floorKm > 40 && floorKm < 50, `floor ~45 km, got ${floorKm.toFixed(1)}`);
+  assert.equal(ok(30), false, "30 km < floor → impossible");
+  assert.equal(ok(67.9), true, "67.9 km is above the floor → fine");
+  // A loop (start ≈ end) has a ~0 floor, so it never false-fires.
+  assert.equal(straightLineFloor([PLACES.amsterdam, PLACES.edam, PLACES.amsterdam]).ok(40), true);
+});
+
+test("geo-sanity: zigzag detection flags the Purmerend→Marken→Volendam backtrack", () => {
+  // The real plan's weird ordering: Purmerend (inland NW) → Marken (SE islet) →
+  // Volendam (back N) nearly doubles back — a sharp reversal.
+  const zig = detectZigzags([PLACES.purmerend, PLACES.marken, PLACES.volendam, PLACES.edam]);
+  assert.ok(zig.length >= 1, "the Marken detour must be flagged");
+  assert.ok(zig.some((z) => z.angleDeg > 135), `expected a near-U-turn, got ${JSON.stringify(zig)}`);
+
+  // A sensible monotonic route up the coast has no sharp reversals.
+  const clean = detectZigzags([PLACES.amsterdam, PLACES.monnickendam, PLACES.volendam, PLACES.edam, PLACES.enkhuizen]);
+  assert.deepEqual(clean, [], "a clean northbound route should not be flagged");
+
+  // Sub-1km wiggles between close points are ignored (not planning errors).
+  const wiggle = detectZigzags([PLACES.volendam, { lat: 52.4945, lon: 5.0749 }, PLACES.volendam], 135, 1);
+  assert.deepEqual(wiggle, [], "tiny legs are below the minLegKm threshold");
+});
+
+test("geo-sanity: verifyRoute combines floor + zigzag into one verdict", () => {
+  const v = verifyRoute([PLACES.purmerend, PLACES.marken, PLACES.volendam, PLACES.edam], 28);
+  assert.equal(v.belowFloor, false, "28 km exceeds this short loop's floor");
+  assert.ok(v.zigzags.length >= 1, "still flags the backtrack");
+});
+
+test("geo-sanity: endpoint grounding catches places no tool resolved", () => {
+  const geocoded = ["Amsterdam, Noord-Holland, Nederland", "Enkhuizen, Noord-Holland, Nederland"];
+  assert.deepEqual(ungroundedEndpoints(["Amsterdam", "Enkhuizen"], geocoded), [], "both endpoints are grounded");
+  assert.deepEqual(
+    ungroundedEndpoints(["Amsterdam", "Atlantis"], geocoded),
+    ["Atlantis"],
+    "an ungrounded endpoint is reported",
+  );
+  assert.deepEqual(ungroundedEndpoints([], geocoded), [], "no endpoints → nothing ungrounded");
 });
 
 test("feedback: submission is normalized defensively and schema-checked", () => {

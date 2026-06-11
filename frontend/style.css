@@ -367,6 +367,11 @@ button.upload-btn {
   animation: rec-pulse 1.2s ease-in-out infinite;
 }
 
+.upload-btn.transcribing {
+  color: var(--accent);
+  animation: rec-pulse 0.9s ease-in-out infinite;
+}
+
 @keyframes rec-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }

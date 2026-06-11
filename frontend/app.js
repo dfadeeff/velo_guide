@@ -455,6 +455,163 @@ class VoiceInput {
   }
 }
 
-new VoiceInput(document.getElementById("mic-btn"), input);
+// --- Server-STT voice path (used when the backend has STT_BACKEND set) --------
+// Records a clip, re-encodes it to WAV in the browser (so the server backend —
+// Gemini or Deepgram — always gets a format it accepts regardless of the native
+// recording codec), uploads it to /transcribe, and drops the transcript into the
+// text box. Same end result as the browser path: text in, all grounding applies.
+function pickAudioMime() {
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"];
+  for (const c of candidates) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return "";
+}
 
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onloadend = () => resolve(String(r.result).split(",")[1] || "");
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
+}
+
+async function blobToWav(blob) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  try {
+    return audioBufferToWavBlob(await ctx.decodeAudioData(await blob.arrayBuffer()));
+  } finally {
+    ctx.close();
+  }
+}
+
+// Mono 16-bit PCM WAV from an AudioBuffer (first channel is plenty for speech).
+function audioBufferToWavBlob(buffer) {
+  const ch = buffer.getChannelData(0);
+  const sr = buffer.sampleRate;
+  const view = new DataView(new ArrayBuffer(44 + ch.length * 2));
+  let p = 0;
+  const str = (s) => { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); };
+  const u32 = (v) => { view.setUint32(p, v, true); p += 4; };
+  const u16 = (v) => { view.setUint16(p, v, true); p += 2; };
+  str("RIFF"); u32(36 + ch.length * 2); str("WAVE");
+  str("fmt "); u32(16); u16(1); u16(1); u32(sr); u32(sr * 2); u16(2); u16(16);
+  str("data"); u32(ch.length * 2);
+  for (let i = 0; i < ch.length; i++) {
+    const s = Math.max(-1, Math.min(1, ch[i]));
+    view.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    p += 2;
+  }
+  return new Blob([view], { type: "audio/wav" });
+}
+
+class ServerVoiceInput {
+  #button;
+  #textarea;
+  #recorder = null;
+  #chunks = [];
+  #stream = null;
+  #baseText = "";
+  #state = "idle";
+
+  constructor(button, textarea) {
+    this.#button = button;
+    this.#textarea = textarea;
+    button.addEventListener("click", () => this.#toggle());
+    this.#setState("idle");
+  }
+
+  async #toggle() {
+    if (this.#state === "recording") return this.#stopRecording();
+    if (this.#state === "transcribing") return;
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      this.#flash("Mic blocked");
+      return;
+    }
+    this.#stream = stream;
+    const mime = pickAudioMime();
+    this.#recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    this.#chunks = [];
+    this.#baseText = this.#textarea.value;
+    this.#recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size) this.#chunks.push(e.data);
+    };
+    this.#recorder.onstop = () => this.#finish();
+    this.#recorder.start();
+    this.#setState("recording");
+  }
+
+  #stopRecording() {
+    this.#setState("transcribing");
+    try {
+      this.#recorder?.stop();
+    } catch {}
+    this.#stream?.getTracks().forEach((t) => t.stop());
+  }
+
+  async #finish() {
+    try {
+      const blob = new Blob(this.#chunks, { type: this.#recorder?.mimeType || "audio/webm" });
+      if (!blob.size) return;
+      const wav = await blobToWav(blob);
+      const res = await fetch("/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: await blobToBase64(wav), mimeType: "audio/wav" }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json.text) {
+        this.#textarea.value = `${this.#baseText} ${json.text}`.trim();
+        this.#textarea.dispatchEvent(new Event("input"));
+      } else if (!res.ok) {
+        this.#flash("Transcription failed");
+      }
+    } catch {
+      this.#flash("Transcription failed");
+    } finally {
+      this.#setState("idle");
+    }
+  }
+
+  #setState(s) {
+    this.#state = s;
+    this.#button.classList.toggle("recording", s === "recording");
+    this.#button.classList.toggle("transcribing", s === "transcribing");
+    this.#button.title =
+      s === "recording"
+        ? "Recording… click to stop"
+        : s === "transcribing"
+          ? "Transcribing…"
+          : "Voice input — recorded and transcribed on the server";
+  }
+
+  #flash(msg) {
+    const prev = this.#textarea.placeholder;
+    this.#textarea.placeholder = msg;
+    setTimeout(() => {
+      this.#textarea.placeholder = prev;
+    }, 2000);
+  }
+}
+
+// Pick the voice path from server config: browser Web Speech API by default, or
+// record+upload when the backend advertises a server STT backend.
+async function initVoice() {
+  const btn = document.getElementById("mic-btn");
+  let mode = "browser";
+  try {
+    const r = await fetch("/config");
+    if (r.ok) mode = (await r.json()).stt || "browser";
+  } catch {}
+  const canRecord = window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  if (mode !== "browser" && canRecord) new ServerVoiceInput(btn, input);
+  else new VoiceInput(btn, input); // browser Web Speech API (hides itself if unsupported)
+}
+
+initVoice();
 connect();

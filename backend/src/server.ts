@@ -10,6 +10,7 @@ import { DEFAULT_MODEL } from "./agent.js";
 import { createVeloGuidePipeline, type PipelineEvent } from "./pipeline.js";
 import { sanitizeImages } from "./utils/images.js";
 import { normalizeSubmission, openFeedbackStore, type TurnRecord } from "./feedback.js";
+import { sttBackend, transcribeAudio, validateAudio } from "./stt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.resolve(__dirname, "../../frontend");
@@ -36,8 +37,29 @@ export async function startServer(port: number, host: string) {
     if (turnBuffer.size > TURN_BUFFER_CAP) turnBuffer.delete(turnBuffer.keys().next().value!);
   };
 
+  const stt = sttBackend();
+
+  // Server-side STT (optional). Registered BEFORE the global JSON parser with
+  // its own higher limit, so an audio upload isn't rejected by the 1 MB cap that
+  // protects the other routes. The frontend uploads WAV; we reuse the OpenRouter
+  // key via an audio-capable chat model (see stt.ts).
+  app.post("/transcribe", express.json({ limit: "10mb" }), async (req, res) => {
+    if (stt === "browser") return res.status(404).json({ error: "server STT disabled" });
+    const audio = validateAudio(req.body?.data, req.body?.mimeType);
+    if (!audio) return res.status(400).json({ error: "invalid or missing audio" });
+    try {
+      res.json({ text: await transcribeAudio(audio) });
+    } catch (err: any) {
+      res.status(502).json({ error: err.message });
+    }
+  });
+
   app.use(express.json({ limit: "1mb" }));
   app.use(express.static(FRONTEND_DIR));
+
+  // Lets the frontend discover which voice path to use (browser Web Speech API
+  // vs. server STT) without baking the choice into the static assets.
+  app.get("/config", (_req, res) => res.json({ stt }));
 
   // Anonymous thumbs up/down on a delivered plan. 404 when feedback is disabled
   // (the UI never shows the controls in that case). 400 on a malformed body,
@@ -69,6 +91,13 @@ export async function startServer(port: number, host: string) {
     console.log(`  model:    ${process.env.MODEL ?? DEFAULT_MODEL}`);
     console.log(`  overpass: ${overpass}`);
     console.log(`  routing:  ${process.env.ORS_API_KEY ? "OpenRouteService (cycling network + elevation)" : "OSRM fallback"}`);
+    const sttLabel =
+      stt === "gemini"
+        ? `server: Gemini via OpenRouter (${process.env.STT_MODEL ?? "google/gemini-2.5-flash"})`
+        : stt === "deepgram"
+          ? `server: Deepgram (${process.env.DEEPGRAM_MODEL ?? "nova-2"})${process.env.DEEPGRAM_API_KEY ? "" : " — ⚠ DEEPGRAM_API_KEY not set"}`
+          : "browser Web Speech API (set STT_BACKEND=gemini|deepgram for server STT)";
+    console.log(`  stt:      ${sttLabel}`);
   });
 
   const wss = new WebSocketServer({ server });
