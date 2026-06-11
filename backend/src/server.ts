@@ -195,6 +195,14 @@ export async function startServer(port: number, host: string) {
           return;
         }
 
+        // "Stop": cancel the in-flight plan. Handled concurrently with the
+        // awaiting prompt handler — aborting the agent lets that await return,
+        // its finally clears `busy`, and response_end is sent normally.
+        if (msg.type === "cancel") {
+          if (busy && pipeline) await pipeline.abort();
+          return;
+        }
+
         if (msg.type !== "prompt") return;
 
         // The web client disables its send button while streaming, but the

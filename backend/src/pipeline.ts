@@ -82,6 +82,9 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
   // every narration-strip reset, so it deterministically survives as the top
   // of the final reply — disclosure is a product rule, not a model behavior.
   let turnPreamble = "";
+  // Set when the user cancels an in-flight turn (Stop button); skips the
+  // reliability guards so we don't fire another model call after an abort.
+  let aborted = false;
 
   const resetTurnText = () => {
     emit({ type: "reset" });
@@ -141,9 +144,12 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
 
   async function promptWithGuards(text: string, images: ImageInput[] | undefined, isNewTrip: boolean): Promise<void> {
     turnToolCalls = [];
+    aborted = false;
     turnText = turnPreamble ? `${turnPreamble}\n\n` : "";
     if (turnText) emit({ type: "delta", text: turnText });
     await session.prompt(text, { images: images?.length ? images : undefined });
+    // User cancelled mid-turn — stop here, no synthesis/clarification re-prompts.
+    if (aborted) return;
 
     // A new trip that never reached plan_route and ends in a question is a
     // stalled plan (e.g. a garbled voice token failed to geocode and the model
@@ -201,6 +207,20 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
     // answer) — coerce deterministically so the params line is always injected.
     if (intake && askedIntake) intake = { ...intake, intent: "new_trip" };
 
+    // Non-NL photo: when an image was identified as outside the Netherlands,
+    // redirect deterministically instead of letting the planner coerce it into a
+    // random Dutch city (the "Helsingborg → Schiedam" bug). Scoped to image turns
+    // so text out-of-scope requests still go to the agent's own redirect.
+    if (intake && (turnHasImages || pendingImages.length > 0) && !intake.in_scope && intake.intent === "new_trip") {
+      pendingTexts = [];
+      pendingImages = [];
+      askedIntake = false;
+      const msg =
+        "That photo looks like it's **outside the Netherlands** — VeloGuide only plans cycling trips in the Netherlands. Tell me a Dutch city or town to start from, or send a photo of a Dutch place.";
+      emit({ type: "delta", text: msg });
+      return { kind: "clarification", text: msg, toolCalls: [], intake };
+    }
+
     let assumed: string[] = [];
     if (intake) {
       const { gate, missing } = gateDecision(intake);
@@ -253,6 +273,12 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
 
   return {
     runTurn,
+    // Cancel the in-flight turn: aborts the agent and waits for it to go idle.
+    // The awaiting runTurn then returns with whatever text was produced so far.
+    abort: async () => {
+      aborted = true;
+      await session.abort();
+    },
     dispose: () => session.dispose(),
   };
 }

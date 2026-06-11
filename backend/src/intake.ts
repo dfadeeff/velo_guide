@@ -57,8 +57,8 @@ Read the user's conversation turns (oldest first) and extract the trip parameter
 
 Rules:
 - intent: "new_trip" when the user asks to plan a trip or names a new start city/region (including "a trip from this city" with a photo attached); "refinement" when adjusting a trip already being discussed ("make day 2 shorter", "more nature"); "other" for greetings or unrelated questions.
-- in_scope: false ONLY if the requested riding area is clearly outside the Netherlands.
-- start_location: the city/town/region the ride STARTS from. If the only clue is an attached photo, identify the place shown in the photo (a recognizable Dutch city or landmark) and use it. null if neither stated nor identifiable.
+- in_scope: false if the requested riding area is clearly outside the Netherlands — INCLUDING a place shown in an attached photo. If a photo looks like a non-Dutch location (a foreign city, mountains, a tropical coast, etc.), set in_scope false.
+- start_location: the city/town/region the ride STARTS from. If the only clue is an attached photo: identify the place ONLY if you are genuinely confident it is a specific, recognizable place IN the Netherlands (a known Dutch city, town, or landmark — e.g. Kinderdijk's windmills, Amsterdam's canals, Groningen's Martinitoren). Be conservative: Dutch canal towns look alike, and many places are not identifiable from a photo. If the photo is outside the Netherlands → in_scope false, start_location null. If you cannot confidently name a SPECIFIC Dutch place → start_location null. NEVER guess a random Dutch city to fill the slot — null is correct and safe (it triggers one question); a wrong guess produces a wrong trip.
 - days: trip length in days, ONLY when a length is explicitly stated: "one-day"/"day trip" = 1, "weekend" = 2, "3-day" = 3. A bare "cycling trip" states NO length — days is null. Never infer 1 from the absence of a length.
 - start_date: resolve relative dates against the current date given above ("today", "tomorrow", "June 20" = its next future occurrence). A month WITH a year = the 1st of that month; a month WITHOUT a year = the 1st of its next future occurrence. CONFLICT RULE: if the request contains BOTH a relative day word ("today", "tomorrow") AND an explicit calendar date, and they do not refer to the same day, set start_date null AND date_conflict true — a conflict must be clarified, never silently resolved to either date. A date that is simply not mentioned is NOT a conflict: start_date null, date_conflict false.
 - Entities stated in EARLIER turns carry over; later turns only override what they explicitly change. For a refinement, return the already-established entities.
@@ -203,13 +203,24 @@ export function assumptionNotice(e: TripEntities, assumed: string[]): string {
 
 export async function extractIntake(turns: UserTurn[]): Promise<IntakeExtraction> {
   const content: any[] = [];
+  let hasImages = false;
   for (const turn of turns) {
     if (turn.text.trim()) content.push({ type: "text", text: `USER TURN: ${turn.text}` });
     for (const img of turn.images ?? []) {
+      hasImages = true;
       content.push({ type: "image_url", image_url: { url: `data:${img.mimeType};base64,${img.data}` } });
     }
   }
   if (!content.length) content.push({ type: "text", text: "USER TURN: (empty)" });
+
+  // Identifying a city from a photo is a vision task the small default model
+  // (Haiku) is weak at — it confidently misnames Dutch canal towns (and even
+  // returns foreign cities). When an image is present, use a stronger vision
+  // model (VISION_MODEL, default Gemini 2.5 Flash — good at landmarks, cheap, same
+  // OpenRouter key). Text-only intake stays on the fast default model.
+  const model = hasImages
+    ? (process.env.VISION_MODEL ?? "google/gemini-2.5-flash")
+    : (process.env.INTAKE_MODEL ?? process.env.MODEL ?? DEFAULT_MODEL);
 
   const res = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -218,7 +229,7 @@ export async function extractIntake(turns: UserTurn[]): Promise<IntakeExtraction
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: process.env.INTAKE_MODEL ?? process.env.MODEL ?? DEFAULT_MODEL,
+      model,
       temperature: 0,
       messages: [
         { role: "system", content: `${EXTRACTION_SYSTEM}\n\n${currentDateLine()}` },
