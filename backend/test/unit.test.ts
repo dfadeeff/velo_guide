@@ -10,7 +10,7 @@ import { formatDuration, formatDistance, haversineDistance, cardinalBearing } fr
 import { buildBbox } from "../src/utils/overpass.js";
 import { textResult, jsonResult } from "../src/utils/tool-result.js";
 import { sanitizeImages } from "../src/utils/images.js";
-import { buildSystemPrompt, FAST_MODE_INSTRUCTION } from "../src/system-prompt.js";
+import { buildSystemPrompt, FAST_MODE_INSTRUCTION, stripReasoningPreamble } from "../src/system-prompt.js";
 import { Value } from "typebox/value";
 import {
   applyDefaultEntities,
@@ -217,6 +217,43 @@ test("system prompt carries today's date and the grounding rules", () => {
     assert.ok(prompt.includes(marker), `prompt must contain "${marker}"`);
   }
   assert.ok(FAST_MODE_INSTRUCTION.includes("FAST MODE"));
+});
+
+test("stripReasoningPreamble removes leaked planning monologue before the itinerary", () => {
+  // The exact failure mode observed: deliberation + draft "= km" lines before the
+  // real "Day N: … | XX km" heading. Draft lines have no pipe, so only the real
+  // itinerary survives.
+  const leaked = [
+    "That's too long for a single day. Let me go with the original plan:",
+    "",
+    "Day 1: Rotterdam → Gouda via Kinderdijk = 55.4 km ✓",
+    "Day 2: Gouda → Lisse → Rotterdam = 86.5 km (too long)",
+    "",
+    "Actually, given the user hasn't specified fitness level, I'll assume moderate-leisure.",
+    "",
+    "Day 1: Rotterdam → Kinderdijk → Gouda | 55 km | ~3h 30m",
+    "Route overview: Polder cycling via waterfront villages.",
+  ].join("\n");
+  const out = stripReasoningPreamble(leaked);
+  assert.ok(out.startsWith("Day 1: Rotterdam → Kinderdijk → Gouda | 55 km"), `got: ${out.slice(0, 60)}`);
+  assert.ok(!out.includes("Let me go with"), "deliberation removed");
+  assert.ok(!out.includes("Actually, given"), "mid draft removed");
+
+  // A legitimate weather note at the very top is preserved (it's a valid start).
+  const withWeather = "⚠️ Rain both days — pack a jacket.\n\nDay 1: A → B | 40 km | ~2h";
+  assert.equal(stripReasoningPreamble(withWeather), withWeather, "weather-led plan untouched");
+
+  // No itinerary marker → returned unchanged (safe no-op, e.g. a clarification).
+  const plain = "Where would you like to start?";
+  assert.equal(stripReasoningPreamble(plain), plain);
+});
+
+test("photoConfirmNotice discloses the photo-identified location for confirmation", async () => {
+  const { photoConfirmNotice } = await import("../src/intake.js");
+  const note = photoConfirmNotice("Groningen");
+  assert.ok(note.includes("Groningen"));
+  assert.ok(/identified the photo/i.test(note));
+  assert.ok(/tell me|re-plan/i.test(note), "invites correction");
 });
 
 test("exactly 7 tools, complete and uniquely named", () => {

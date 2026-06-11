@@ -175,6 +175,14 @@ function handleMessage(msg) {
       currentAssistantWrapper = null;
       break;
 
+    case "reset_done":
+      // Fresh server session — clear the conversation so the user starts clean.
+      chat.innerHTML = "";
+      addSystemNote("New trip — started a fresh conversation. Previous context cleared.");
+      setStatus("connected", "Ready");
+      sendBtn.disabled = false;
+      break;
+
     case "error":
       stopTimer();
       setStatus("connected", "Ready");
@@ -184,6 +192,12 @@ function handleMessage(msg) {
       break;
   }
 }
+
+// "New trip": ask the server for a fresh session (see server reset handler).
+document.getElementById("new-trip-btn")?.addEventListener("click", () => {
+  if (isStreaming) return;
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
+});
 
 // Thumbs up/down on a delivered plan. One POST to /feedback; a downvote first
 // reveals an optional one-line reason box (the most useful signal for the eval
@@ -557,7 +571,10 @@ class ServerVoiceInput {
   async #finish() {
     try {
       const blob = new Blob(this.#chunks, { type: this.#recorder?.mimeType || "audio/webm" });
-      if (!blob.size) return;
+      if (!blob.size) {
+        addSystemNote("🎤 No audio captured — check that the mic is working and try again.");
+        return;
+      }
       const wav = await blobToWav(blob);
       const res = await fetch("/transcribe", {
         method: "POST",
@@ -566,13 +583,21 @@ class ServerVoiceInput {
       });
       const json = await res.json().catch(() => ({}));
       if (res.ok && json.text) {
+        // The transcript goes into the INPUT box (not the chat) so you review/edit
+        // before sending — highlight it briefly so it's obvious where it landed.
         this.#textarea.value = `${this.#baseText} ${json.text}`.trim();
         this.#textarea.dispatchEvent(new Event("input"));
-      } else if (!res.ok) {
-        this.#flash("Transcription failed");
+        this.#textarea.focus();
+        this.#textarea.classList.add("just-transcribed");
+        setTimeout(() => this.#textarea.classList.remove("just-transcribed"), 1200);
+      } else if (res.ok) {
+        // 200 but empty → the model heard no intelligible speech.
+        addSystemNote("🎤 Didn't catch any speech — try again, speaking clearly into the mic.");
+      } else {
+        addSystemNote(`🎤 Transcription failed: ${json.error || res.statusText}`);
       }
-    } catch {
-      this.#flash("Transcription failed");
+    } catch (err) {
+      addSystemNote(`🎤 Could not transcribe the recording (${err?.message || "audio error"}).`);
     } finally {
       this.#setState("idle");
     }

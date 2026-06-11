@@ -47,9 +47,13 @@ export async function startServer(port: number, host: string) {
     if (stt === "browser") return res.status(404).json({ error: "server STT disabled" });
     const audio = validateAudio(req.body?.data, req.body?.mimeType);
     if (!audio) return res.status(400).json({ error: "invalid or missing audio" });
+    const t0 = Date.now();
     try {
-      res.json({ text: await transcribeAudio(audio) });
+      const text = await transcribeAudio(audio);
+      console.log(`transcribe: ${stt} ${Date.now() - t0}ms → ${text ? `"${text.slice(0, 80)}"` : "(no speech)"}`);
+      res.json({ text });
     } catch (err: any) {
+      console.error(`transcribe: ${stt} failed after ${Date.now() - t0}ms — ${err.message}`);
       res.status(502).json({ error: err.message });
     }
   });
@@ -169,6 +173,28 @@ export async function startServer(port: number, host: string) {
 
       try {
         const msg = JSON.parse(raw.toString());
+
+        // "New trip": dispose the session and start a fresh one. This is how the
+        // user separates a genuinely new trip from continuing a conversation —
+        // long multi-turn sessions accumulate context (and re-process uploaded
+        // photos each turn), so a clean slate restores fast responses. Refining
+        // an existing plan stays in the SAME session and is unaffected.
+        if (msg.type === "reset") {
+          if (busy) {
+            send({ type: "error", message: "Still working — wait for the current plan to finish before starting a new trip." });
+            return;
+          }
+          pipeline?.dispose();
+          try {
+            pipeline = await createVeloGuidePipeline({ onEvent: forward });
+            send({ type: "reset_done" });
+          } catch (err: any) {
+            send({ type: "error", message: `Failed to start a new session: ${err.message}` });
+            ws.close();
+          }
+          return;
+        }
+
         if (msg.type !== "prompt") return;
 
         // The web client disables its send button while streaming, but the

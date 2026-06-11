@@ -179,6 +179,15 @@ export function confirmedParamsLine(e: TripEntities, assumed: string[] = []): st
   return `${base} The user did not specify ${assumed.join(", ")} — these are ASSUMED defaults. A notice stating the assumption is already pinned above your reply: do NOT restate it, start directly with the plan.]`;
 }
 
+// Identifying a start location from a PHOTO is a guess — different Dutch canal
+// towns (Groningen vs Dokkum, Delft vs Leiden) look alike to a vision model, and
+// a wrong guess silently propagates to every later turn. So the plan discloses
+// the identification for confirmation instead of committing to it silently. Pinned
+// by the pipeline as the first line, same mechanism as assumptionNotice.
+export function photoConfirmNotice(location: string): string {
+  return `*I identified the photo as **${location}** — if that's not the place, tell me the city and I'll re-plan.*`;
+}
+
 // The disclosure pinned by the pipeline as the first line of a plan built on
 // assumed parameters ("state it on top" is a hard product rule — so it is done
 // in code, not delegated to the model).

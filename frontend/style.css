@@ -79,6 +79,26 @@ body {
   align-items: center;
   gap: 10px;
 }
+
+.new-trip-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  font-family: inherit;
+  padding: 5px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+
+.new-trip-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .timer {
   font-variant-numeric: tabular-nums;
   font-size: 13px;
@@ -426,6 +446,14 @@ textarea {
 
 textarea:focus {
   border-color: var(--accent);
+}
+
+/* Brief highlight when a voice transcript is dropped into the input box, so it's
+   obvious where the recognized text landed (it's not auto-sent). */
+textarea.just-transcribed {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  transition: background 0.4s, border-color 0.4s;
 }
 
 #send-btn {
