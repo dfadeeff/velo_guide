@@ -148,5 +148,24 @@
       "Does not plan a Swiss route",
       "Suggests a Netherlands alternative or asks to refocus"
     ]
+  },
+  {
+    "id": "amsterdam-teen-geo-audit",
+    "name": "2-Day Amsterdam Teen Trip (geo-audit regression)",
+    "input": "Plan a 2-day cycling trip from Amsterdam for a teen, starting June 14",
+    "expected_tools": [
+      "geocode",
+      "get_weather",
+      "plan_route",
+      "find_pois",
+      "find_accommodation"
+    ],
+    "assertions": [
+      "Day routes progress geographically without doubling back (no Purmerend -> Marken -> Volendam style zigzag)",
+      "The Day 2 return distance is geographically plausible for its endpoints, not implausibly short",
+      "Transport claims are specific and correct (NOT 'any village has a train station to Amsterdam' - many Waterland villages have only buses)",
+      "Daily distances and pace suit a teen (active but not punishing)",
+      "Both days' start and end points are real, geocoded places"
+    ]
   }
 ]

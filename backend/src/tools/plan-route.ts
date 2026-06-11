@@ -29,6 +29,11 @@ interface RouteResult {
   // southeast"). Computed from the input coordinates so the model never has to
   // guess compass directions in its prose.
   leg_bearings: string[];
+  // The routed waypoints, echoed back. Makes the result self-describing: the
+  // geo-sanity checks (utils/geo-sanity.ts) reconstruct the path geometry from
+  // this to flag zigzags / impossibly short days, and the model/judge can see
+  // exactly which points were routed rather than inferring from prose.
+  waypoints: Coordinate[];
   ascent_m?: number;
   descent_m?: number;
   instructions?: Array<{ instruction: string; distance: string; name?: string }>;
@@ -83,6 +88,7 @@ async function planWithORS(coords: Coordinate[]): Promise<RouteResult> {
     duration: formatDuration(summary.duration * 1000),
     duration_hours: (summary.duration / 3600).toFixed(1),
     leg_bearings: legBearings(coords),
+    waypoints: coords,
     ascent_m: feature.properties.ascent != null ? Math.round(feature.properties.ascent) : undefined,
     descent_m: feature.properties.descent != null ? Math.round(feature.properties.descent) : undefined,
     instructions: steps.slice(0, 8),
@@ -130,6 +136,7 @@ async function planWithOSRM(coords: Coordinate[]): Promise<RouteResult> {
     duration: formatDuration(cyclingSeconds * 1000),
     duration_hours: (cyclingSeconds / 3600).toFixed(1),
     leg_bearings: legBearings(coords),
+    waypoints: coords,
     instructions: steps?.slice(0, 8),
   };
 }

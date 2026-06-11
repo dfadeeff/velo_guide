@@ -18,6 +18,7 @@ import dotenv from "dotenv";
 import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import { verifyRoute, ungroundedEndpoints, type LatLon } from "../src/utils/geo-sanity.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
@@ -68,6 +69,20 @@ interface Check {
   detail?: string;
 }
 
+// Unwrap a pi-agent tool result envelope ({ content: [{ text: "<json>" }] }) to
+// the parsed payload the tool returned. Tolerates an already-parsed object.
+function unwrapToolJson(result: any): any {
+  const text = result?.content?.[0]?.text;
+  if (typeof text === "string") {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  return result ?? null;
+}
+
 const TURN_TIMEOUT_MS = 300_000;
 // Fast mode mirrors the web UI default; FAST=0 evaluates the detailed path.
 const fast = process.env.FAST !== "0";
@@ -89,6 +104,10 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
   const toolCalls: string[] = [];
   // Raw stringified result per tool name — grounding checks regex into this.
   const toolOutputs: Record<string, string> = {};
+  // Structured captures for the geo-sanity checks: the actual routed geometry
+  // (waypoints + distance) per plan_route call, and the names geocode resolved.
+  const planRoutes: Array<{ waypoints: LatLon[]; km: number }> = [];
+  const geocodedNames: string[] = [];
 
   const pipeline = await createVeloGuidePipeline({
     model: tc.model,
@@ -96,6 +115,14 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
       if (event.type === "tool_start") toolCalls.push(event.name);
       if (event.type === "tool_end") {
         toolOutputs[event.name] = (toolOutputs[event.name] ?? "") + JSON.stringify(event.result ?? "");
+        if (event.name === "plan_route") {
+          const r = unwrapToolJson(event.result);
+          if (r && Array.isArray(r.waypoints)) planRoutes.push({ waypoints: r.waypoints, km: parseFloat(r.distance_km) });
+        }
+        if (event.name === "geocode") {
+          const r = unwrapToolJson(event.result);
+          if (Array.isArray(r)) for (const g of r) if (g?.name) geocodedNames.push(String(g.name));
+        }
       }
     },
   });
@@ -256,6 +283,53 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
     });
   } else {
     checks.push({ name: "day distances match plan_route", status: "skip" });
+  }
+
+  // 7. Geo-sanity on the routed GEOMETRY itself — the layer grounding misses.
+  //    The day-distance check (6) only proves a number matches plan_route; it
+  //    can't tell whether the route the model asked for makes geographic sense.
+  //    These inspect the waypoints plan_route echoed back.
+  if (planRoutes.length) {
+    const belowFloor: string[] = [];
+    const zigzags: string[] = [];
+    for (const pr of planRoutes) {
+      if (!Array.isArray(pr.waypoints) || pr.waypoints.length < 2 || !isFinite(pr.km)) continue;
+      const v = verifyRoute(pr.waypoints, pr.km);
+      // (A) HARD fail: a routed day shorter than the great-circle line between
+      //     its endpoints is geometrically impossible (wrong endpoints / bad number).
+      if (v.belowFloor) belowFloor.push(`${v.routedKm} km < ${v.floorKm} km straight-line floor`);
+      // (B) Zigzag: the path nearly doubles back on itself (the Marken-detour class).
+      if (v.zigzags.length) zigzags.push(`${v.zigzags.length}× (~${v.zigzags.map((z) => z.angleDeg + "°").join(", ")})`);
+    }
+    checks.push({
+      name: "routes ≥ straight-line floor (no impossible days)",
+      status: belowFloor.length ? "fail" : "pass",
+      detail: belowFloor.length ? belowFloor.join("; ") : `${planRoutes.length} route(s) checked`,
+    });
+    checks.push({
+      name: "no route zigzags / backtracking",
+      status: zigzags.length ? "fail" : "pass",
+      detail: zigzags.length ? zigzags.join("; ") : `${planRoutes.length} route(s) checked`,
+    });
+  } else {
+    checks.push({ name: "geo-sanity (routed geometry)", status: "skip", detail: "no plan_route waypoints" });
+  }
+
+  // 8. Endpoint grounding: every place named as a day's start/end must have been
+  //    geocoded — catches narrative endpoints that no tool ever resolved.
+  const dayEndpoints = [...text.matchAll(/Day\s*\d+\s*:\s*([^→|\n]+?)\s*(?:→|->)\s*([^→|\n]+?)\s*\|/gi)]
+    .flatMap((m) => [m[1], m[2]])
+    .map((s) => s.replace(/[*_#]/g, "").trim())
+    .filter(Boolean);
+  if (dayEndpoints.length && geocodedNames.length) {
+    const ungrounded = [...new Set(ungroundedEndpoints(dayEndpoints, geocodedNames))];
+    checks.push({
+      name: "day endpoints are geocoded",
+      status: ungrounded.length ? "fail" : "pass",
+      detail: ungrounded.length ? `not in geocode output: ${ungrounded.join(", ")}` : `${dayEndpoints.length} endpoint(s) checked`,
+    });
+  } else {
+    checks.push({ name: "day endpoints are geocoded", status: "skip" });
   }
 
   // Optional LLM-as-judge pass: verdicts the judgment-call assertions (these

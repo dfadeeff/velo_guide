@@ -120,7 +120,32 @@ session and scores it programmatically (exit code is CI-usable). Per case it che
 3. **Junction numbers are grounded**: every number in a "knooppunten …:" list appears in `find_knooppunten` output
 4. **POI usage**: the reply names places returned by `find_pois`/`find_accommodation`
 5. **Day distances match `plan_route`** within 2% — catches estimated-not-computed numbers
-6. **Latency** per case is reported (target: <30s with a local Overpass)
+6. **Geo-sanity on the routed geometry** (`backend/src/utils/geo-sanity.ts`) — see below
+7. **Day endpoints are geocoded** — every place named as a day's start/end (`Day 1: Amsterdam → Enkhuizen`) must appear in `geocode` output, so route endpoints are tool-sourced, not narrative
+8. **Latency** per case is reported (target: <30s with a local Overpass)
+
+### Geo-sanity: validating decisions, not just facts
+
+Grounding guarantees every *fact* comes from a tool, but the model still chooses
+**which** waypoints to feed `plan_route` — so a faithful tool returns a real
+distance for a geographically silly route (a zigzag, an impossibly short hop).
+The LLM-as-judge can't catch this: it treats tool output as ground truth, so a
+number that matches `plan_route` "passes". `plan_route` now echoes its routed
+**waypoints**, and the eval inspects that geometry directly:
+
+- **Straight-line floor** (hard fail) — a routed day shorter than the great-circle
+  line between its endpoints is geometrically impossible (wrong endpoints or a
+  fabricated number). Loops (start ≈ end) have a ~0 floor, so they never false-fire.
+- **Zigzag / backtrack detection** — at each interior waypoint, the incoming and
+  outgoing leg bearings are compared; a near-U-turn flags a route that doubled
+  back (the real *Purmerend → Marken → Volendam* detour is caught this way). Tiny
+  sub-1 km legs are ignored so in-town wiggles aren't mistaken for planning errors.
+
+These are **pure functions, unit-tested offline** (`make test`, no API key) with
+real Dutch coordinates — including the actual Marken backtrack and a clean
+northbound route as a negative control — and then run on live agent output in
+`make eval`. This is the layer that closes the gap a user's geo-audit exposed:
+*grounded ≠ well-planned*.
 
 The suite also covers **multimodal input** (the `image-input` case sends a real
 windmill photo and checks the reply identifies the landscape — see Scenario 4)
