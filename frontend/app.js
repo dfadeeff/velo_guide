@@ -2,6 +2,7 @@ const chat = document.getElementById("chat");
 const form = document.getElementById("input-form");
 const input = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
+const stopBtn = document.getElementById("stop-btn");
 const imageInput = document.getElementById("image-input");
 const fastCheckbox = document.getElementById("fast-checkbox");
 const imagePreview = document.getElementById("image-preview");
@@ -129,6 +130,10 @@ function handleMessage(msg) {
     case "response_start": {
       isStreaming = true;
       setStatus("thinking", "Thinking...");
+      // Swap Send → Stop while a plan is in flight (cancel a slow request).
+      sendBtn.hidden = true;
+      stopBtn.hidden = false;
+      stopBtn.disabled = false;
       const contentEl = addMessage("assistant", "");
       currentAssistantWrapper = contentEl.parentElement;
       streamingMsg = new StreamingMessage(contentEl);
@@ -164,6 +169,8 @@ function handleMessage(msg) {
       isStreaming = false;
       stopTimer();
       setStatus("connected", "Ready");
+      stopBtn.hidden = true;
+      sendBtn.hidden = false;
       sendBtn.disabled = false;
       activeTools.clear();
       toolStatus.innerHTML = "";
@@ -187,6 +194,8 @@ function handleMessage(msg) {
       stopTimer();
       setStatus("connected", "Ready");
       isStreaming = false;
+      stopBtn.hidden = true;
+      sendBtn.hidden = false;
       sendBtn.disabled = false;
       addMessage("assistant", `Error: ${msg.message}`);
       break;
@@ -197,6 +206,14 @@ function handleMessage(msg) {
 document.getElementById("new-trip-btn")?.addEventListener("click", () => {
   if (isStreaming) return;
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "reset" }));
+});
+
+// "Stop": cancel the in-flight plan. The server aborts the agent; response_end
+// then arrives normally and restores the Send button.
+stopBtn?.addEventListener("click", () => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "cancel" }));
+  stopBtn.disabled = true;
+  setStatus("thinking", "Stopping…");
 });
 
 // Thumbs up/down on a delivered plan. One POST to /feedback; a downvote first
