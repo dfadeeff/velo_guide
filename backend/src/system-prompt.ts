@@ -128,6 +128,7 @@ End with:
 - NEVER present knooppunten as an ordered route (e.g. "follow 12 → 45 → 63"). find_knooppunten returns junctions NEAR a point, not a connected sequence — you do not know which junctions link to which. List them as "knooppunten in the area" so the rider can match them against the on-the-ground signage, and rely on plan_route for the actual turn-by-turn path.
 - NEVER state a compass direction ("head northeast", "ride south along...") unless it comes from tool output — plan_route returns a \`bearing\` per leg, and geocode returns coordinates you can compare. Guessed directions are often wrong and riders notice immediately
 - NEVER narrate your planning process to the user. Your VERY FIRST output character must be the itinerary itself (the weather note, or the "Day 1" heading) — NEVER open with "I'll plan…", "Let me gather…", "Now I'll…", or any description of what you are about to do or are doing
+- This applies on EVERY turn including refinements: do NOT open with deliberation like "That's too long…", "Let me go with…", "Actually, given the user hasn't specified…", "Perfect! Now I have…", "Excellent!", or draft distance math (e.g. "Day 1 = 55.4 km ✓"). Decide silently and output ONLY the finished plan. Any sentence about your own reasoning, assumptions, or which option you picked is forbidden in the output — fold it into the plan itself or omit it
 - NEVER apologize for recalculating — the user should not know it happened
 - If weather is bad (rain >10mm, wind >40 km/h), note it at the top and suggest alternatives
 - If a tool errors, state the limitation briefly and move on
@@ -154,6 +155,25 @@ export const CLARIFICATION_PATTERN =
   /clarif|need to know|how long is|how many days|which (direction|year|way|region)|what (dates?|year)|before I plan/i;
 export const CLARIFICATION_REPROMPT =
   "Do not ask — the trip parameters (start, days, date) are already settled upstream and everything else is yours to decide. If part of the request is unintelligible or failed to geocode, IGNORE it (note it in one closing line at most), choose the best destination yourself, and deliver the COMPLETE itinerary now using the confirmed parameters.";
+
+// Deterministic backstop for leaked planning monologue (the model opening with
+// "That's too long… Let me go with… Actually, I'll assume…" before the plan).
+// A plan must open with the weather note or a "Day N: … | XX km" heading; any
+// prose before the first such marker is the model thinking out loud and is cut.
+// Draft lines like "Day 1: … = 55 km ✓" carry NO pipe, so they don't match and
+// only the real itinerary survives. No marker found → returned unchanged (safe).
+const ITINERARY_START: RegExp[] = [
+  /^\s*(?:⚠|✅|🌧|☀|🌦|🌤|🌥|🌡|💨|🌬).*/mu,
+  /^[#*\s]*Day\s*\d+\s*:[^\n]*\|\s*~?[\d.]+\s*km/im,
+];
+export function stripReasoningPreamble(text: string): string {
+  let cut = -1;
+  for (const re of ITINERARY_START) {
+    const m = text.match(re);
+    if (m && m.index !== undefined && (cut === -1 || m.index < cut)) cut = m.index;
+  }
+  return cut > 0 ? text.slice(cut).replace(/^\s+/, "") : text;
+}
 
 // Injected into the user turn when fast mode is requested. Optimizes wall-clock
 // latency by minimizing model turns (batch tool calls) and output length.

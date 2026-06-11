@@ -28,6 +28,7 @@ import {
   CLARIFICATION_PATTERN,
   CLARIFICATION_REPROMPT,
   FAST_MODE_INSTRUCTION,
+  stripReasoningPreamble,
   SYNTHESIS_REPROMPT,
 } from "./system-prompt.js";
 import {
@@ -37,6 +38,7 @@ import {
   confirmedParamsLine,
   extractIntake,
   gateDecision,
+  photoConfirmNotice,
   type IntakeExtraction,
   type UserTurn,
 } from "./intake.js";
@@ -95,6 +97,27 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
   // Ask-once latch for the current trip request; cleared after a planning turn
   // so the NEXT new-trip request gets its own question.
   let askedIntake = false;
+  // A start location once identified from a photo, carried forward as TEXT so the
+  // extractor doesn't have to re-process the image on every later turn (re-sending
+  // every uploaded photo each turn was the main latency amplifier in long chats).
+  let photoLocationHint: string | null = null;
+
+  // What the extractor sees: full text history, but images ONLY from the current
+  // (latest) turn — older photos are dropped and the location they resolved is
+  // injected as a cheap text hint instead. Cuts per-turn cost without losing
+  // entity carry-over in a genuine multi-turn conversation.
+  const extractionView = (): UserTurn[] => {
+    const view: UserTurn[] = userTurns.map((t, i) => ({
+      text: t.text,
+      images: i === userTurns.length - 1 ? t.images : undefined,
+    }));
+    if (photoLocationHint) {
+      view.unshift({
+        text: `[Context: a start location was earlier identified from a photo as ${photoLocationHint}. Carry it forward as the start unless the user names a different start.]`,
+      });
+    }
+    return view;
+  };
 
   session.subscribe((event: AgentSessionEvent) => {
     opts.onSessionEvent?.(event);
@@ -141,6 +164,20 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
       resetTurnText();
       await session.prompt(CLARIFICATION_REPROMPT);
     }
+
+    // Final backstop: strip any leaked planning monologue before the itinerary
+    // proper (operating on the MODEL text only, so the pinned notice survives).
+    // The agent ran tools on a real plan, so this is a plan turn, not a question.
+    if (isNewTrip || turnToolCalls.length > 0) {
+      const pinned = turnPreamble ? `${turnPreamble}\n\n` : "";
+      const model = turnText.startsWith(pinned) ? turnText.slice(pinned.length) : turnText;
+      const stripped = stripReasoningPreamble(model);
+      if (stripped !== model) {
+        emit({ type: "reset" });
+        turnText = `${pinned}${stripped}`;
+        emit({ type: "delta", text: turnText });
+      }
+    }
   }
 
   async function runTurn(input: TurnInput): Promise<TurnOutcome> {
@@ -150,9 +187,10 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
     // Intake gate. Extraction failure is survivable: fall through to the agent,
     // whose fallback defaults still produce a plan (graceful degradation beats
     // a hard error for the user).
+    const turnHasImages = !!input.images?.length;
     let intake: IntakeExtraction | undefined;
     try {
-      intake = await extractIntake(userTurns);
+      intake = await extractIntake(extractionView());
     } catch (err: any) {
       console.error(`intake extraction failed (${err.message}) — proceeding with agent defaults`);
     }
@@ -191,9 +229,22 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
     if (intake?.intent === "new_trip") parts.push(confirmedParamsLine(intake, assumed));
     if (fast) parts.push(FAST_MODE_INSTRUCTION);
     const images = [...pendingImages, ...(input.images ?? [])];
+    const pendingHadImages = pendingImages.length > 0;
     pendingTexts = [];
     pendingImages = [];
-    turnPreamble = intake && assumed.length ? assumptionNotice(intake, assumed) : "";
+
+    // A location identified from a photo this turn is a GUESS — disclose it for
+    // confirmation (and remember it as text so later turns need no re-upload).
+    const photoDerived = (turnHasImages || pendingHadImages) && !!intake?.start_location && intake.intent !== "refinement";
+    if (photoDerived && intake?.start_location) photoLocationHint = intake.start_location;
+
+    // Pin the disclosures the product rules require above the plan (done in code,
+    // never delegated to the model): the photo identification, then any assumed
+    // defaults.
+    const notices: string[] = [];
+    if (photoDerived && intake?.start_location) notices.push(photoConfirmNotice(intake.start_location));
+    if (intake && assumed.length) notices.push(assumptionNotice(intake, assumed));
+    turnPreamble = notices.join("\n\n");
 
     await promptWithGuards(parts.filter(Boolean).join("\n\n"), images, intake?.intent === "new_trip");
     askedIntake = false;
