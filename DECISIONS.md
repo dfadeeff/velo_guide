@@ -19,13 +19,13 @@
 
 ## LLM-Specific Issues Handled
 
-Hallucinated numbers → tool-computed only, eval-checked · Invented places → OSM names only, eval-checked · Fabricated junction routes → proximity framing + eval regex · Stale sense of "today" → current date injected per session · Guessed compass directions → computed per-leg bearings · Premature stop/empty turn → re-prompt guard · Unbalanced days → hard balance rule · Clarification loops → answer-first defaults (date, duration, fitness) · Far-future weather → 16-day clamp, plan anyway · Impossible routes/API failures → graceful degradation, never invented data.
+Hallucinated numbers → tool-computed only, eval-checked · Invented places → OSM names only, eval-checked · Fabricated junction routes → proximity framing + eval regex · Stale sense of "today" → current date injected per session · Guessed compass directions → computed per-leg bearings · Premature stop/empty turn → re-prompt guard · Unbalanced days → hard balance rule · Clarification loops → answer-first defaults + pipeline guard (zero-tool question replies re-prompted once) · Far-future weather → 16-day clamp, plan anyway, limitation stated · Impossible routes/API failures → graceful degradation, never invented data.
 
 ## Limitations
 
 - Knooppunten are listed near the route, not sequence-routed (requires building the `rcn` graph — the principled next step).
 - Public free-tier APIs throttle under burst; mitigated by cache + serialized queue + bounded backoff, removed entirely by the local Overpass.
-- Soft hallucinations (e.g. "upscale" vibe adjectives) are not caught by programmatic checks — LLM-as-judge is the planned next eval stage.
+- Soft hallucinations (ungrounded prices, counts, frequencies) slip past programmatic checks — caught by the LLM-as-judge layer (`JUDGE=1 make eval`), which also scores quality dimensions 1–5; residual risk is judge miscalibration (it is an LLM too).
 - No GPX export, live closures, or cross-session persistence; web search (DuckDuckGo) is shallow — a real search API would improve seasonal context.
 
 ## Scaling

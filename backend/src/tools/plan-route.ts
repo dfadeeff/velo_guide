@@ -147,23 +147,43 @@ export const planRouteTool = defineTool({
       }),
       { description: "Waypoints in order [start, ...via, end]. Minimum 2 points.", minItems: 2 },
     ),
+    target_min_km: Type.Optional(
+      Type.Number({
+        description:
+          "Minimum acceptable distance in km for this leg/day given the traveller's level (e.g. 80 for an experienced cyclist's full day). If the routed distance comes in below this, the result tells you to re-route with more waypoints.",
+      }),
+    ),
   }),
   execute: async (_toolCallId, params) => {
     const coords = params.coordinates;
     const errors: string[] = [];
 
+    // The distance-adequacy correction lives in the tool result (not only the
+    // system prompt) because the model attends far more reliably to tool text:
+    // a short route comes back with an explicit re-route instruction attached.
+    const withTargetCheck = (route: RouteResult): RouteResult & { distance_check?: string } => {
+      const km = parseFloat(route.distance_km);
+      if (params.target_min_km && km < params.target_min_km) {
+        return {
+          ...route,
+          distance_check: `TOO SHORT: ${km} km is below the ${params.target_min_km} km minimum for this traveller. Do NOT present this as a full day — call plan_route again with additional waypoints (a wider loop or a detour) until the distance is at least ${params.target_min_km} km.`,
+        };
+      }
+      return route;
+    };
+
     // Prefer ORS (cycling-network + elevation) when a key is configured; fall
     // back to OSRM so routing always works even without/with an invalid key.
     if (process.env.ORS_API_KEY) {
       try {
-        return jsonResult(await planWithORS(coords));
+        return jsonResult(withTargetCheck(await planWithORS(coords)));
       } catch (err: any) {
         errors.push(`ORS failed (${err.message}); fell back to OSRM.`);
       }
     }
 
     try {
-      return jsonResult(await planWithOSRM(coords));
+      return jsonResult(withTargetCheck(await planWithOSRM(coords)));
     } catch (err: any) {
       errors.push(`OSRM failed (${err.message}).`);
       return textResult(

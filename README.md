@@ -137,6 +137,10 @@ make smoke   # One real headless agent turn with tool/latency trace + grounding 
 make eval    # Run the eval suite (backend/eval/test-cases.json) with a pass/fail scorecard
 ```
 
+Add `JUDGE=1` to `make eval` for the LLM-as-judge pass: a second model (Sonnet by
+default) verdicts the judgment-call assertions, scores quality dimensions 1–5, and
+flags soft hallucinations against the captured tool outputs. See EVALUATION.md.
+
 **CI** (GitHub Actions): every push runs the type-check, unit tests, and a frontend
 syntax check. The live agent eval (`make eval`, real LLM + geo API calls) is a
 manually dispatched job — it spends API credits and depends on rate-limited public

@@ -118,17 +118,59 @@ check above covers the voice path; the browser-side recognition itself is
 verified manually (mic button, Chrome/Edge/Safari).
 
 Run a single case with `CASE=basic-day-trip make eval`; `FAST=0` evaluates the
-detailed (non-fast) mode. The judgment-call assertions in `test-cases.json`
+detailed (non-fast) mode. Cases may pin a mode: `multi-day-experienced` sets
+`"fast": false` because hitting 80–130 km/day requires the iterative re-routing
+that fast mode's batch-everything instruction suppresses — judged runs showed
+42–56 km/day in fast mode vs in-range days in detailed mode (which is the mode a
+user planning a serious multi-day trip would use). The judgment-call assertions in `test-cases.json`
 (e.g. "beginner-friendly advice is given") are printed alongside each case for
 manual review. `make smoke` runs one ad-hoc prompt with the same checks plus a
 timestamped latency trace; it also exercises **multi-turn refinement** (second
 CLI arg = a follow-up turn; reports whether the agent adjusted with few tool
 calls or re-asked/re-planned) and **image input** (`IMAGE=eval/fixtures/dutch-windmill.jpg`).
 
+### LLM-as-judge (`JUDGE=1 make eval`)
+
+The judgment-call half is also runnable. With `JUDGE=1`, every reply is scored by a
+**different model** than the agent (Sonnet judges Haiku by default; `JUDGE_MODEL`
+overrides) against the dimensions above, using the captured tool outputs as ground
+truth:
+
+- **Per-case assertion verdicts** (e.g. "Keukenhof is suggested", "beginner-friendly
+  advice is given") — these gate pass/fail because they are concrete yes/no questions.
+- **Dimension scores 1–5** (completeness, Dutch authenticity, weather handling,
+  profile fit, grounding) — reported and averaged across the suite as a quality trend,
+  not a gate.
+- **Soft-hallucination detection** — specific factual claims with no basis in the tool
+  outputs (prices, monument counts, train frequencies). This is the class programmatic
+  checks structurally cannot catch; in practice the judge surfaced exactly these (a
+  "~€5–6" ticket price, "19 windmills", "trains every 15–20 min"), which drove a
+  numbers-grounding rule in the system prompt.
+
+The judge prompt carries explicit **calibration rules** (rounding is fine; <150 m
+cumulative ascent counts as "flat" in NL; per-area junction lists are correct usage;
+omissions lower scores but are not hallucinations; loop trips need no final-night
+hotel; the verdict field must match the reason's conclusion) — each added after
+observing the judge over-fail on exactly that. Caveat: the judge is itself an LLM;
+treat dimension scores as trend signal across runs, not absolute truth, and
+spot-check its verdicts.
+
+**What the judged eval has already driven** (evaluation working as intended):
+a numbers-grounding prompt rule (after the judge caught "~€5–6 ticket", "19
+windmills"), flagship-sight anchoring for famous regions (after a Veluwe plan
+missed Hoge Veluwe), the clarification pipeline guard (after zero-tool question
+replies recurred), a `target_min_km` feedback signal in `plan_route` results,
+and **measured model routing**: across 7 judged runs Haiku hit the 80–130 km/day
+experienced-rider target only once (typical: 40–65 km days) even with the prompt
+rule and tool feedback; Sonnet lands ~80–100 km/day. The eval therefore pins
+`multi-day-experienced` to detailed mode + Sonnet (`"fast"`/`"model"` fields),
+and the product guidance follows the same data: ambitious multi-day trips are
+where `MODEL=anthropic/claude-sonnet-4.6` earns its ~3× cost; Haiku stays the
+default for everything else.
+
 ### Future automation
 
-1. **LLM-as-judge**: a second LLM scores completeness and Dutch authenticity against the checklists above (dimensions 5 & 7)
-2. **A/B model comparison**: run the same suite across Claude Haiku (default) vs Claude Sonnet (quality upgrade) vs Gemini Flash (cost floor), score all
+1. **A/B model comparison**: run the same judged suite across Claude Haiku (default) vs Claude Sonnet (quality upgrade) vs Gemini Flash (cost floor), compare dimension averages
 
 ## Evaluation Cadence
 

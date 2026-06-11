@@ -4,7 +4,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createVeloGuideSession, DEFAULT_MODEL } from "./agent.js";
-import { FAST_MODE_INSTRUCTION, SYNTHESIS_REPROMPT } from "./system-prompt.js";
+import {
+  CLARIFICATION_PATTERN,
+  CLARIFICATION_REPROMPT,
+  FAST_MODE_INSTRUCTION,
+  SYNTHESIS_REPROMPT,
+} from "./system-prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.resolve(__dirname, "../../frontend");
@@ -50,6 +55,8 @@ export function startServer(port: number, host: string) {
 
     let session: Awaited<ReturnType<typeof createVeloGuideSession>> | null = null;
     let textCharsThisTurn = 0;
+    let textThisTurn = "";
+    let toolCallsThisTurn = 0;
     let busy = false;
 
     try {
@@ -62,6 +69,7 @@ export function startServer(port: number, host: string) {
           const msgEvent = event.assistantMessageEvent;
           if (msgEvent.type === "text_delta") {
             textCharsThisTurn += msgEvent.delta.length;
+            textThisTurn += msgEvent.delta;
             ws.send(JSON.stringify({ type: "delta", text: msgEvent.delta }));
           }
         }
@@ -73,6 +81,8 @@ export function startServer(port: number, host: string) {
           // so the narration strip lives server-side (works for the web UI,
           // CLI, and any future API client alike) rather than per-client.
           textCharsThisTurn = 0;
+          textThisTurn = "";
+          toolCallsThisTurn++;
           ws.send(JSON.stringify({ type: "reset" }));
           ws.send(JSON.stringify({
             type: "tool_start",
@@ -120,6 +130,8 @@ export function startServer(port: number, host: string) {
 
           try {
             textCharsThisTurn = 0;
+            textThisTurn = "";
+            toolCallsThisTurn = 0;
             // Fast mode is the DEFAULT (compact plans, fewer turns). A client
             // opts into detailed mode by sending fast === false.
             const fast = msg.fast !== false;
@@ -130,13 +142,19 @@ export function startServer(port: number, host: string) {
               images: images?.length ? images : undefined,
             });
 
-            // Reliability guard: the model occasionally ends a turn after
-            // gathering tool data but before writing the itinerary (an empty
-            // completion / premature stop). Detect a turn that produced no
-            // text and re-prompt once to synthesize from the data already in
-            // context — no new tool calls needed.
+            // Reliability guard 1 (premature stop): the model occasionally ends
+            // a turn after gathering tool data but before writing the itinerary.
+            // Detect a turn that produced no text and re-prompt once to
+            // synthesize from the data already in context.
             if (textCharsThisTurn < 20) {
               await session.prompt(SYNTHESIS_REPROMPT);
+            } else if (toolCallsThisTurn === 0 && CLARIFICATION_PATTERN.test(textThisTurn)) {
+              // Reliability guard 2 (clarification loop): the model asked about
+              // trip length/year/direction instead of planning, violating the
+              // answer-first policy. Discard the question client-side and
+              // re-prompt once to apply defaults and deliver the plan.
+              ws.send(JSON.stringify({ type: "reset" }));
+              await session.prompt(CLARIFICATION_REPROMPT);
             }
           } catch (err: any) {
             ws.send(JSON.stringify({ type: "error", message: err.message }));

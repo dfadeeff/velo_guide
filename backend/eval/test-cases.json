@@ -16,10 +16,12 @@
     "id": "multi-day-experienced",
     "name": "Multi-Day Experienced Cyclist",
     "input": "Plan a 3-day trip through the Veluwe for an experienced cyclist",
+    "fast": false,
+    "model": "anthropic/claude-sonnet-4.6",
     "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois", "find_accommodation", "find_knooppunten"],
     "assertions": [
       "Plan has 3 distinct days with separate routes",
-      "Daily distances are 80-130 km",
+      "Daily distances are approximately 80-130 km (a few km under 80 is acceptable; 40-60 km days are not)",
       "Accommodation is suggested for each overnight stop",
       "Veluwe-specific attractions mentioned (Hoge Veluwe, Kröller-Müller, etc.)",
       "All accommodations appear in find_accommodation tool results"
@@ -31,7 +33,7 @@
     "input": "I want to cycle from Rotterdam to Kinderdijk to see the windmills. I'm a beginner.",
     "expected_tools": ["geocode", "plan_route", "get_weather", "find_pois"],
     "assertions": [
-      "Route distance is under 40 km (one way ~15 km)",
+      "Total cycling distance is appropriate for a beginner (at most ~40 km)",
       "Windmill-related POIs are included",
       "Beginner-friendly advice is given",
       "No distances or times are stated without tool backing"

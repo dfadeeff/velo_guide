@@ -68,8 +68,9 @@ jobs:
             echo "::error::OPENROUTER_API_KEY repository secret is not set"
             exit 1
           fi
-      - name: Run eval suite
+      - name: Run eval suite (with LLM-as-judge)
         working-directory: backend
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          JUDGE: "1"
         run: npx tsx eval/run-eval.ts

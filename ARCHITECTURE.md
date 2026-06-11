@@ -63,11 +63,13 @@ strategy, and `make eval` verifies it end-to-end.
 | Stale sense of "today" | LLMs resolve "tomorrow" against their training cutoff. The current date (Europe/Amsterdam) is injected into the system prompt at session creation, so relative dates and `get_weather` calls resolve correctly |
 | Guessed compass directions | The model invents bearings ("ride northeast to Kinderdijk" — it's southeast). `plan_route` returns a computed per-leg cardinal bearing; the prompt forbids stating directions not present in tool output |
 | Unbalanced multi-day plans | A 13 km "day" between two 40 km days reads as a planning failure. Hard prompt rule: days must be roughly comparable (no day < half the longest, full days ≥ ~30 km) unless the user asks for a rest day |
-| Clarification loops | Answer-first policy: explicit defaults for date (tomorrow), trip length (1 day), fitness (moderate), interests (mixed); the only permitted question is a genuinely missing start location. Verified by eval cases (far-future date, seasonal query) |
+| Clarification loops | Answer-first policy: explicit defaults for date (tomorrow), trip length (1 day), fitness (moderate), destination (chosen, not asked); the only permitted question is a genuinely missing start location. Prompt rules alone proved ~70-90% reliable across eval runs, so a **pipeline guard** backstops them: a zero-tool reply matching the observed asking patterns ("how long", "which year", "I need to clarify") is discarded and re-prompted once with the defaults reminder — same architecture as the empty-turn guard |
 | Weather for far-future dates | `get_weather` validates the 16-day horizon, clamps straddling ranges, and instructs the model to plan anyway and advise checking later |
 | Impossible routes | Routing errors surfaced with explanation (water crossing, no bike route, etc.) |
 | Over-ambitious daily distances | System prompt includes fitness-level guidelines; agent flags unreasonable plans (eval: 200 km casual request) |
 | Fabricated knooppunten sequences | `find_knooppunten` returns a *proximity list* (with an explicit `note`), and the prompt forbids presenting junctions as an ordered "12 → 45 → 63" route — the one place the grounding invariant could leak is closed by framing junctions as "in the area". Eval greps for fabricated sequences and verifies every quoted junction number exists in tool output |
+| Soft hallucinations (ungrounded prices, counts, frequencies) | Prompt rule: precise figures must be tool-sourced or omitted. Detection: LLM-as-judge eval layer (`JUDGE=1 make eval`) cross-checks every claim against the captured tool outputs — it surfaced "~€5–6 ticket", "19 windmills", "trains every 15–20 min" in practice |
+| LLM-as-judge miscalibration | The judge over-failed on rounding, NL-flatness, and per-area junction lists; its prompt now carries explicit calibration rules, concrete assertions gate pass/fail while dimension scores stay advisory, and the judge runs on a different model than the agent |
 | Stale/missing data | Disclaimer that OSM data may be incomplete; suggest verifying opening hours |
 
 ## Latency Engineering
@@ -128,6 +130,6 @@ the rider matches the listed junction numbers against on-the-ground signage.
 - `backend/src/tools/` — 7 tools declared with `defineTool()` (schema-derived param types); shared result envelope in `utils/tool-result.ts`
 - `backend/src/utils/overpass.ts` — encapsulated Overpass client (cache, serialized queue, backoff) behind a single `queryOverpass()`
 - `backend/src/server.ts` — Express + WebSocket transport: streaming, narration strip, heartbeat, per-connection busy guard
-- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same typed `AgentSessionEvent` stream
+- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same typed `AgentSessionEvent` stream; `backend/eval/judge.ts` — LLM-as-judge scoring (separate judge model, calibrated rubric)
 - `backend/test/unit.test.ts` — offline unit tests (geo/format helpers, bearing correctness, prompt invariants, tool registry, eval-case schema); run by CI on every push
 - `frontend/` — vanilla JS; streaming render and voice input encapsulated in small classes (`StreamingMessage`, `VoiceInput`)
