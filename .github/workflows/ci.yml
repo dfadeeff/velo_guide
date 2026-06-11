@@ -45,7 +45,7 @@ jobs:
         run: node --check frontend/app.js
 
   live-eval:
-    name: Live agent eval (11 scenarios)
+    name: Live agent eval (12 scenarios)
     needs: checks
     if: github.event_name == 'workflow_dispatch' && inputs.live_eval
     runs-on: ubuntu-latest

@@ -150,9 +150,11 @@ northbound route as a negative control — and then run on live agent output in
 The suite also covers **multimodal input** (the `image-input` case sends a real
 windmill photo and checks the reply identifies the landscape — see Scenario 4)
 and per-case **`reply_must_match`** content assertions. **Voice input** is
-transcribed to text in the browser before it reaches the agent, so every text
-check above covers the voice path; the browser-side recognition itself is
-verified manually (mic button, Chrome/Edge/Safari).
+transcribed to text before it reaches the agent — by the browser (default) or a
+server STT backend (`STT_BACKEND=gemini|deepgram`) — so every text check above
+covers the voice path regardless of mode; the recognition itself is verified
+manually (mic button) and the server-STT round-trip via the `/transcribe`
+endpoint.
 
 Run a single case with `CASE=basic-day-trip make eval`; `FAST=0` evaluates the
 detailed (non-fast) mode. Cases may pin a mode: `multi-day-experienced` sets

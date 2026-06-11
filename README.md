@@ -4,9 +4,20 @@
 
 AI-powered system for planning 1–3 day cycling trips in the Netherlands, built on the [pi-agent](https://github.com/earendil-works/pi) framework.
 
-**Input:** text, images (photo of a place you'd like to visit), and voice (browser speech-to-text, Chrome/Edge/Safari). **Output:** a grounded, multi-day itinerary; refine it across turns ("make day 2 shorter").
+**Input:** text, images (photo of a place you'd like to visit — its city is identified and used as the start), and voice. **Output:** a grounded, multi-day itinerary; refine it across turns ("make day 2 shorter"), or hit **Stop** to cancel and **+ New trip** to start fresh.
+
+Voice has two modes: the default **browser** speech-to-text (Chrome/Edge/Safari, no server call) or, set via `STT_BACKEND`, **server-side STT** (Deepgram, or Gemini through the same OpenRouter key) for much better accuracy — see [STT options](#voice-input-stt). Either way the transcript becomes ordinary text before the agent sees it, so every grounding rule applies to all modalities.
 
 **Docs:** [DECISIONS.md](DECISIONS.md) (one-page decisions/assumptions/limitations/scaling) · [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) · [EVALUATION.md](EVALUATION.md) (quality evaluation plan)
+
+## How this maps to the evaluation criteria
+
+| Criterion | Where it's addressed |
+|-----------|----------------------|
+| **Runnable, testable prototype** | This README — [Quick Start](#quick-start) (`make setup && make run`), `make smoke` (one real headless plan + latency trace), `make test` (offline unit tests), `make eval` (scored scenario suite). [Local Overpass](#fast-local-overpass-recommended) for usable latency. |
+| **Result quality & LLM-issue handling** | The **tool-grounding invariant** (the LLM never emits a falsifiable fact) + the full **LLM-Specific Issue table** in [ARCHITECTURE.md](ARCHITECTURE.md); verified end-to-end by `make eval` (programmatic grounding + geo-sanity checks) and `JUDGE=1 make eval` (LLM-as-judge). Plan in [EVALUATION.md](EVALUATION.md). |
+| **Adequacy of assumptions** | [DECISIONS.md → Assumptions](DECISIONS.md#assumptions) (recreational profiles, fitness drives distance, accommodation out of scope, NL OSM coverage), with the technical boundary explained in [ARCHITECTURE.md](ARCHITECTURE.md). |
+| **Paths toward scaling** | [DECISIONS.md → Scaling](DECISIONS.md#scaling) (×100 / ×10,000 summary) and the [ARCHITECTURE.md → Scalability](ARCHITECTURE.md#scalability-where-it-breaks-first) deep-dive (where it breaks first and the fix at each tier). |
 
 ## Prerequisites
 
@@ -26,13 +37,15 @@ make run
 
 Open http://localhost:3000 in your browser.
 
-> **⚠️ Strongly recommended for usable latency:** set up a **[local Overpass](#fast-local-overpass-recommended)** (see below) before serious use. Without it, POI/junction lookups hit the rate-limited public OSM endpoint and a full plan takes ~1 minute when un-throttled, several minutes when rate-limited; with it, ~15–35s (day trips typically under 20s). The app falls back to the public endpoint automatically if it's not configured.
+> **⚠️ Strongly recommended for usable latency:** set up a **[local Overpass](#fast-local-overpass-recommended)** (see below) before serious use. Without it, POI/junction lookups hit the rate-limited public OSM endpoint and a full plan takes ~1 minute when un-throttled, several minutes when rate-limited; with it, a *fresh* plan is ~30s (latency is model-generation-bound, not tool-bound — see [ARCHITECTURE.md](ARCHITECTURE.md#latency-engineering)). The app falls back to the public endpoint automatically if it's not configured.
+
+> **Note on long conversations:** each turn replays the growing history to the model, so a long multi-turn session gets slower. Click **+ New trip** to start a fresh session (resets latency) when you begin a genuinely different trip; refining the current plan is unaffected.
 
 > **Tip:** **⚡ Fast** mode (next to the input) is **on by default** — the model batches its tool calls and writes a compact, scannable plan. Uncheck it for a fuller, more detailed multi-day itinerary.
 
 ### Fast local Overpass (recommended)
 
-POI and junction lookups use the public OSM Overpass API, which is rate-limited and slow under load. Running a local Overpass with just the Netherlands extract removes the limit and brings a full plan to ~15–35s (measured: day trips 15–20s, 3-day trips up to ~35s).
+POI and junction lookups use the public OSM Overpass API, which is rate-limited and slow under load. Running a local Overpass with just the Netherlands extract removes the limit; a fresh plan then lands around ~30s (measured: 1-day ~30s, 3-day ~32s — the bulk is model generation across the agent's sequential turns, not the geo lookups, which total ~5s).
 
 One-time setup (needs Docker). Budget **~30–60 min** total, mostly hands-off: ~1.3 GB download, then a PBF→OSM-XML conversion (single-threaded bzip2, the slow part), then the database import. It runs in the background in a persistent Docker volume, so you only do it once.
 
@@ -83,6 +96,10 @@ Browser (chat) ←WebSocket→ Express server → intake gate ─(start/days/dat
 
 Before any planning, the gate (a tool-free extraction — it cannot route or plan) settles three parameters: **start location** (text or photo), **trip length (days)**, and **start date** (for a real forecast). A missing start or length → one targeted question, and the planning agent is never invoked. A missing date is never asked — tomorrow is assumed and stated at the top of the plan; only *conflicting* dates ("today" vs "from June 20") trigger the question. The gate asks at most once: decline to specify and it plans with stated defaults (1 day, from Amsterdam, starting tomorrow), disclosing the assumption. Refinement turns ("make day 2 shorter") skip the gate.
 
+When the start comes from a **photo**, the gate identifies the city with a vision model (`VISION_MODEL`, default Gemini 2.5 Flash — a small text model is unreliable at this) and discloses it for confirmation ("I identified the photo as Groningen — tell me if that's wrong"); a photo of a clearly non-Dutch place is redirected rather than coerced into an NL city.
+
+The UI also exposes **Stop** (cancel an in-flight plan via the SDK's `session.abort()`) and **+ New trip** (dispose the session and start fresh — the latency reset for long conversations).
+
 ### Tools
 
 | Tool | API | Purpose |
@@ -98,9 +115,24 @@ Before any planning, the gate (a tool-free extraction — it cannot route or pla
 ### Stack
 
 - **LLM**: Claude Haiku 4.5 via OpenRouter (default; ~2× Sonnet's throughput, reliable tool-calling — see DECISIONS.md). Set `MODEL=anthropic/claude-sonnet-4.6` for higher reasoning quality, or `MODEL=google/gemini-2.5-flash` for the lowest cost.
+- **Vision** (photo → city): `VISION_MODEL`, default `google/gemini-2.5-flash`; used by the intake step only when an image is attached.
 - **Agent**: pi-agent SDK (`@earendil-works/pi-coding-agent`)
 - **Backend**: TypeScript, Express, WebSocket
 - **Frontend**: Vanilla HTML/CSS/JS, marked.js for markdown
+- **Speech-to-text**: `STT_BACKEND` — `browser` (default, Web Speech API) · `gemini` (OpenRouter key) · `deepgram` (`DEEPGRAM_API_KEY`)
+- **Feedback loop** *(optional)*: set `FEEDBACK_DB` to capture 👍/👎 on plans; `make feedback-report` turns downvotes into regression cases (see EVALUATION.md)
+
+### Voice input (STT)
+
+The 🎤 button's accuracy depends on `STT_BACKEND`:
+
+| `STT_BACKEND` | Engine | Key | Notes |
+|---------------|--------|-----|-------|
+| `browser` (default) | Browser Web Speech API | none | No server call; accuracy varies, mishears place names |
+| `gemini` | Gemini via OpenRouter | uses `OPENROUTER_API_KEY` | Records in-browser → server transcribes; domain-biased |
+| `deepgram` | Deepgram STT | `DEEPGRAM_API_KEY` | Dedicated STT, robust on non-speech (no confabulation) |
+
+For server modes the browser records audio, re-encodes it to WAV, and POSTs to `/transcribe`; the transcript lands in the input box for review before sending. The agent only ever receives text, so all grounding rules hold regardless of mode.
 
 ## Project Structure
 
@@ -114,15 +146,19 @@ velo_guide/
 ├── backend/
 │   ├── package.json
 │   ├── tsconfig.json
-│   ├── eval/                    # Test cases + runnable eval harness (make eval)
+│   ├── eval/                    # Test cases + eval harness (make eval) + feedback-report.ts
 │   ├── test/                    # Offline unit tests (make test, CI)
 │   └── src/
 │       ├── main.ts              # Entry point
-│       ├── server.ts            # Express + WebSocket
+│       ├── server.ts            # Express + WebSocket + /transcribe, /feedback, /config
 │       ├── agent.ts             # Pi-agent session factory
-│       ├── system-prompt.ts     # Dutch cycling domain prompt
+│       ├── system-prompt.ts     # Dutch cycling domain prompt + reasoning-strip backstop
+│       ├── intake.ts            # Deterministic intake gate (text/photo, TypeBox-validated)
+│       ├── pipeline.ts          # Shared conversation pipeline (gate → agent → guards)
+│       ├── stt.ts               # Server STT (browser/gemini/deepgram)
+│       ├── feedback.ts          # Off-by-default 👍/👎 capture (node:sqlite)
 │       ├── tools/               # 7 custom tools
-│       └── utils/               # Overpass query builder, formatters
+│       └── utils/               # Overpass client, formatters, geo-sanity, images
 └── frontend/
     ├── index.html               # Chat interface
     ├── style.css
