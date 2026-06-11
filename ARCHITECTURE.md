@@ -25,11 +25,34 @@ this:
 4. The model reads the results and either calls more tools or writes the final
    itinerary. The loop repeats until it stops calling tools.
 
-**Input modalities.** Text is primary. Images travel through
-`session.prompt(text, { images })` to a vision-capable model. Voice is
-transcribed **in the browser** (Web Speech API) and arrives as ordinary text —
-the backend never handles audio, so every grounding rule below applies to all
-three modalities unchanged.
+**Input modalities.** Text is primary. **Images** are handled in two places: the
+intake step identifies the start city from a photo using a vision model
+(`VISION_MODEL`, default Gemini 2.5 Flash — see "Photo identification" below),
+and the planning agent receives the image via `session.prompt(text, { images })`.
+**Voice** is transcribed to text *before* the agent sees it — by default in the
+browser (Web Speech API), or, when `STT_BACKEND` is set, by a server STT backend
+(Deepgram, or Gemini on the same OpenRouter key): the browser records audio,
+re-encodes it to WAV, and POSTs it to `/transcribe`. Either way the agent's input
+is **text + image only**, so every grounding rule below applies to all modalities
+unchanged.
+
+**Photo identification.** A photo's city is a *guess*, so it is treated as one.
+The intake extractor (which can use a stronger `VISION_MODEL` than the default
+chat model, because small models misname Dutch canal towns and even return
+foreign cities) identifies the place; the plan then **discloses it for
+confirmation** ("I identified the photo as Groningen — tell me if that's wrong")
+rather than committing silently, and a clearly non-Dutch photo is **redirected**
+("which Dutch city?") instead of coerced into an NL location.
+
+**Cancellation & session reset.** A long multi-turn conversation replays its
+growing history each turn, so latency climbs. Two affordances address this: a
+**Stop** button cancels an in-flight plan via the SDK's `session.abort()` (the
+reliability guards are skipped so no extra model call fires after a cancel), and
+**New trip** disposes the session and starts a fresh one — the explicit way to
+separate a new trip from continuing a conversation. To keep genuine multi-turn
+chats fast without a manual reset, the intake extractor re-sends only the current
+turn's image and carries a photo-resolved location forward as cheap text instead
+of re-processing every uploaded photo each turn.
 
 **Why this makes a good velo guide for a *specific* country.** The
 "Netherlands-ness" is not a parameter — it is baked into three layers:
@@ -59,6 +82,9 @@ strategy, and `make eval` verifies it end-to-end.
 | Issue | Mitigation |
 |-------|------------|
 | Premature stop / empty completion | The model occasionally ends a turn after gathering tool data but before writing the plan. Primary mitigation: a model measured reliable in tool loops (Haiku 4.5 default; Sonnet 4.6 as the quality upgrade — Gemini Flash was rejected for exactly this failure). Backstop: a guard that detects a turn producing no itinerary text and re-prompts once to synthesize from the data already in context |
+| Leaked planning monologue | The model (especially on refinement turns) opens with deliberation — "That's too long… Let me go with… Actually, given the user hasn't specified…" — or draft distance math before the plan. Mitigation: an explicit prompt rule, plus a deterministic backstop (`stripReasoningPreamble`) that removes any prose before the itinerary proper (the real `Day N: … \| XX km` header or weather note); draft `= 55 km ✓` lines have no pipe and don't survive, so only the finished plan reaches the user |
+| Geographically silly routes (grounded but wrong) | Grounding guarantees every *number* comes from a tool, but the model chooses which waypoints to feed `plan_route`, so a faithful tool returns a real distance for a zigzag or an impossibly short hop. The LLM-as-judge can't catch this (the number matches the tool). `plan_route` echoes its waypoints; **geo-sanity checks** (`utils/geo-sanity.ts`, run in `make eval`) flag a day below the straight-line floor (impossible) and near-U-turn backtracks (the Purmerend→Marken→Volendam class), plus day endpoints not present in `geocode` output |
+| Wrong photo-city identification | A small text model misnames Dutch canal towns and even returns foreign cities. Mitigation: image identification uses a stronger `VISION_MODEL` (default Gemini 2.5 Flash); the prompt is conservative (confident Dutch place or `null` → ask, never guess); the result is disclosed for confirmation; a non-NL photo is redirected, not coerced |
 | Hallucinated distances/times | `plan_route` tool provides computed values; system prompt forbids estimation; eval checks every day-header distance against tool output (sums of consecutive legs allowed) |
 | Invented restaurants/places | All POI names come from OSM; system prompt says "ONLY mention tool-returned places"; eval checks the reply uses tool-returned names |
 | Stale sense of "today" | LLMs resolve "tomorrow" against their training cutoff. The current date (Europe/Amsterdam) is injected into the system prompt at session creation, so relative dates and `get_weather` calls resolve correctly |
@@ -98,9 +124,18 @@ Overpass API calls** (POIs + knooppunten). Findings and fixes:
   the limitation instead of inventing data), (d) prompt guidance to **batch POI
   categories** into single calls.
 - The decisive fix is the **self-hosted Overpass with a Dutch extract** (README
-  "Fast local Overpass"): measured full plans at ~15–35s (day trips typically
-  under 20s; the remainder is model generation). Without it, an un-throttled
-  plan is ~1 minute; throttled, several minutes.
+  "Fast local Overpass"): with it, the tool calls total ~5s and a *fresh* plan is
+  ~30s (measured: 1-day ~30s, 3-day ~32s) — **the remainder is model generation**
+  across the agent's ~5 sequential turns, which is now the dominant cost, not the
+  geo lookups. Without local Overpass, an un-throttled plan is ~1 minute;
+  throttled, several minutes.
+- **Multi-turn growth.** Each turn replays the whole conversation to the model, so
+  a long session slows turn-over-turn — a single fresh plan is ~30s, but a 4-turn
+  image-heavy session was observed at 130–170s. Mitigations: the intake extractor
+  no longer re-sends old photos each turn (carrying a resolved location as text),
+  and **New trip** disposes the session for a clean slate. The base ~30s per fresh
+  plan is model-bound; further wins would come from provider pinning, shorter
+  outputs, or fewer sequential turns.
 
 ## Model Choice Details
 
@@ -125,15 +160,69 @@ step. We chose honest framing over a fabricated sequence so the grounding
 invariant holds end-to-end; turn-by-turn navigation comes from `plan_route`, and
 the rider matches the listed junction numbers against on-the-ground signage.
 
+## Scalability: where it breaks first
+
+The one-page summary is in [DECISIONS.md → Scaling](DECISIONS.md#scaling); this is
+the reasoning behind it. The useful question isn't "how do we scale" in the
+abstract — it's *what breaks first at each tier, and what's the cheapest fix*.
+
+**Today (prototype, ~1 user).** One Node process: in-memory pi-agent session per
+WebSocket, in-memory Overpass cache + per-turn buffer, feedback in a local SQLite
+file. A single point of everything — correct for a demo, deliberately not built
+for more (the brief puts infrastructure out of scope).
+
+**The two binding constraints — neither is the LLM.**
+1. **Stateful WebSocket sessions.** Conversation state lives in the process, so a
+   second instance can't serve a reconnecting user. This is what forces the first
+   architectural change, well before model cost matters.
+2. **External API rate limits.** Nominatim (1 req/s), ORS free tier, and public
+   Overpass all throttle under a single plan's burst. The local Overpass already
+   proves the fix; the others need the same treatment.
+
+**×100 (~100 concurrent plans).**
+- *Sessions* → move state to **Redis with TTL** so any node serves any user (or
+  keep sticky-WebSocket routing and accept the smaller blast radius). This is the
+  step the in-memory design is explicitly a placeholder for.
+- *Geo APIs* → **self-host OSRM + Overpass** (removes the rate limits entirely),
+  cache common route corridors; paid tiers or self-hosting for Nominatim.
+- *LLM* → cost is **cents per plan at Haiku**, so spend isn't the issue at this
+  tier — throughput is; a **request queue** smooths bursts. Feedback SQLite →
+  Postgres.
+- *Shape*: a containerised backend behind a load balancer with sticky WebSockets.
+
+**×10,000.**
+- *Decouple the slow part.* A 90s plan must not occupy a connection slot: a
+  **stateless API tier + message queue + LLM worker pool** so planning runs
+  out-of-band and the front tier stays light.
+- *Cache hit rate becomes THE cost lever.* Here LLM inference dominates spend, so:
+  **prompt caching** (the system prompt is identical across users), **precomputed
+  popular corridors / knooppunten graph / POI clusters**, and **tiered responses**
+  (serve cached or templated plans for common requests; full tool-calling only for
+  novel ones).
+- *Observability* — LLM-call tracing, tool-latency dashboards, rate-limit/error
+  alerting. You cannot tune a cache hit rate you cannot measure.
+- *Data & region* — EU multi-region, Postgres for sessions and saved trips; the
+  **feedback loop becomes the continuous-eval pipeline** (downvotes → regression
+  suite → prompt/model iteration), which is how quality is held while scaling.
+
+**What does *not* change with scale.** The tool-grounding invariant is
+scale-invariant: the tools get faster/cheaper backends, but "the LLM never emits a
+falsifiable fact" holds identically at 1 user or 10,000. The intake gate, the
+eval harness, and the geo-sanity checks are stateless and scale trivially. That
+the core correctness story is independent of the scaling story is the point — we
+scale the *plumbing*, not the *guarantees*.
+
 ## Code Structure
 
 - `backend/src/agent.ts` — session factory (model selection via parameter or env, auth, compaction/retry settings)
 - `backend/src/system-prompt.ts` — domain prompt, built per session (date injection); fast-mode instruction
 - `backend/src/intake.ts` — intake gate: tool-free parameter extraction (start/days/date, photo-aware) parsed through a **TypeBox data model** (`IntakeExtractionSchema`: one definition yields the JSON Schema, the inferred TS type, and the runtime validator — junk normalizes to null = "ask the user", and `Value.Check` enforces the contract on every extraction); templated clarifying question; refusal defaults — pure helpers unit-tested offline
-- `backend/src/pipeline.ts` — the single shared conversation pipeline (intake gate → planning agent → reliability guards, narration strip) used by server, smoke, and eval, so the eval measures exactly what production runs; one long-lived instance per connection carries the multi-turn session
+- `backend/src/pipeline.ts` — the single shared conversation pipeline (intake gate → planning agent → reliability guards, narration strip, reasoning-preamble strip) used by server, smoke, and eval, so the eval measures exactly what production runs; one long-lived instance per connection carries the multi-turn session, and exposes `abort()` for the Stop button
+- `backend/src/stt.ts` — server speech-to-text dispatcher (`browser` / `gemini` via OpenRouter / `deepgram`); the agent only ever receives the resulting text
+- `backend/src/feedback.ts` — off-by-default 👍/👎 capture over `node:sqlite` (no dependency; enabled via `FEEDBACK_DB`), with TypeBox-validated submissions
 - `backend/src/tools/` — 7 tools declared with `defineTool()` (schema-derived param types); shared result envelope in `utils/tool-result.ts`
-- `backend/src/utils/overpass.ts` — encapsulated Overpass client (bounded cache, serialized queue, backoff) behind a single `queryOverpass()`; `utils/images.ts` — validation caps for untrusted client images
-- `backend/src/server.ts` — Express + WebSocket transport only (streaming relay, heartbeat, per-connection busy guard); all conversation logic lives in the pipeline
-- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same pipeline; `backend/eval/judge.ts` — LLM-as-judge scoring (separate judge model, calibrated rubric)
-- `backend/test/unit.test.ts` — offline unit tests (geo/format helpers, bearing correctness, prompt invariants, tool registry, eval-case schema); run by CI on every push
-- `frontend/` — vanilla JS; streaming render and voice input encapsulated in small classes (`StreamingMessage`, `VoiceInput`)
+- `backend/src/utils/overpass.ts` — encapsulated Overpass client (bounded cache, serialized queue, backoff) behind a single `queryOverpass()`; `utils/images.ts` — validation caps for untrusted client images; `utils/geo-sanity.ts` — pure route-geometry checks (straight-line floor, zigzag/backtrack, endpoint grounding)
+- `backend/src/server.ts` — Express + WebSocket transport (streaming relay, heartbeat, per-connection busy guard, Stop/cancel + New-trip reset) plus the `/transcribe`, `/feedback`, and `/config` HTTP endpoints; all conversation logic lives in the pipeline
+- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same pipeline; `backend/eval/judge.ts` — LLM-as-judge scoring (separate judge model, calibrated rubric); `backend/eval/feedback-report.ts` — turns captured downvotes into candidate regression cases
+- `backend/test/unit.test.ts` — offline unit tests (geo/format helpers, bearing correctness, prompt invariants, intake gate, geo-sanity, feedback store, tool registry, eval-case schema); run by CI on every push
+- `frontend/` — vanilla JS; streaming render, voice input, and server-STT recording encapsulated in small classes (`StreamingMessage`, `VoiceInput`, `ServerVoiceInput`); Stop / New-trip / feedback controls
