@@ -1,5 +1,7 @@
 # VeloGuide — AI Cycling Trip Planner for the Netherlands
 
+[![CI](https://github.com/dfadeeff/velo_guide/actions/workflows/ci.yml/badge.svg)](https://github.com/dfadeeff/velo_guide/actions/workflows/ci.yml)
+
 AI-powered system for planning 1–3 day cycling trips in the Netherlands, built on the [pi-agent](https://github.com/earendil-works/pi) framework.
 
 **Input:** text, images (photo of a place you'd like to visit), and voice (browser speech-to-text, Chrome/Edge/Safari). **Output:** a grounded, multi-day itinerary; refine it across turns ("make day 2 shorter").
@@ -111,6 +113,7 @@ velo_guide/
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── eval/                    # Test cases + runnable eval harness (make eval)
+│   ├── test/                    # Offline unit tests (make test, CI)
 │   └── src/
 │       ├── main.ts              # Entry point
 │       ├── server.ts            # Express + WebSocket
@@ -128,10 +131,17 @@ velo_guide/
 
 ```bash
 make lint    # Type-check
+make test    # Offline unit tests (no network, no API key)
 make run     # Start dev server
 make smoke   # One real headless agent turn with tool/latency trace + grounding checks
 make eval    # Run the eval suite (backend/eval/test-cases.json) with a pass/fail scorecard
 ```
+
+**CI** (GitHub Actions): every push runs the type-check, unit tests, and a frontend
+syntax check. The live agent eval (`make eval`, real LLM + geo API calls) is a
+manually dispatched job — it spends API credits and depends on rate-limited public
+endpoints, so it's run from the Actions tab (with the `OPENROUTER_API_KEY` repo
+secret) before releases or after prompt/model changes.
 
 `make smoke` accepts a custom prompt, an optional follow-up turn (multi-turn
 refinement check), and an optional image (multimodal check):

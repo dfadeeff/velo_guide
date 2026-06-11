@@ -1,4 +1,4 @@
-.PHONY: setup run lint smoke eval clean
+.PHONY: setup run lint test smoke eval clean
 
 setup:
 	cd backend && npm install
@@ -8,6 +8,10 @@ run:
 
 lint:
 	cd backend && npx tsc --noEmit
+
+# Offline unit tests (no network, no API key) — same as the CI `checks` job
+test:
+	cd backend && npm test
 
 # One real headless agent turn with a tool/latency trace and grounding checks.
 # Optional: PROMPT="Plan a 2-day trip from Utrecht" make smoke

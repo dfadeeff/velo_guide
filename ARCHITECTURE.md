@@ -129,4 +129,5 @@ the rider matches the listed junction numbers against on-the-ground signage.
 - `backend/src/utils/overpass.ts` — encapsulated Overpass client (cache, serialized queue, backoff) behind a single `queryOverpass()`
 - `backend/src/server.ts` — Express + WebSocket transport: streaming, narration strip, heartbeat, per-connection busy guard
 - `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same typed `AgentSessionEvent` stream
+- `backend/test/unit.test.ts` — offline unit tests (geo/format helpers, bearing correctness, prompt invariants, tool registry, eval-case schema); run by CI on every push
 - `frontend/` — vanilla JS; streaming render and voice input encapsulated in small classes (`StreamingMessage`, `VoiceInput`)

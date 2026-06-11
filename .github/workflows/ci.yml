@@ -1,0 +1,75 @@
+# Two-tier CI:
+#
+#   1. `checks` — deterministic, free, runs on every push/PR: type-check,
+#      offline unit tests, frontend syntax check. No secrets, no network calls
+#      to external APIs.
+#   2. `live-eval` — the full agent eval suite (real LLM + geo API calls).
+#      Manual-dispatch only: it spends OpenRouter credits, depends on the
+#      rate-limited public Overpass endpoint (flaky from shared CI runners),
+#      and needs the OPENROUTER_API_KEY repository secret. Run it from the
+#      Actions tab before a release or after prompt/model changes.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      live_eval:
+        description: "Also run the live eval suite (spends API credits; needs OPENROUTER_API_KEY secret)"
+        type: boolean
+        default: false
+
+jobs:
+  checks:
+    name: Type-check & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Type-check
+        working-directory: backend
+        run: npm run lint
+      - name: Unit tests (offline)
+        working-directory: backend
+        run: npm test
+      - name: Frontend syntax check
+        run: node --check frontend/app.js
+
+  live-eval:
+    name: Live agent eval (8 scenarios)
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' && inputs.live_eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+      - name: Check secret is configured
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          if [ -z "$OPENROUTER_API_KEY" ]; then
+            echo "::error::OPENROUTER_API_KEY repository secret is not set"
+            exit 1
+          fi
+      - name: Run eval suite
+        working-directory: backend
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: npx tsx eval/run-eval.ts

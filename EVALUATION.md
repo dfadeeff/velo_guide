@@ -132,6 +132,6 @@ calls or re-asked/re-planned) and **image input** (`IMAGE=eval/fixtures/dutch-wi
 
 ## Evaluation Cadence
 
-- **Pre-release**: `make eval` + manual scoring of all dimensions on the 7 scenarios
+- **Every push (CI)**: type-check + offline unit tests (`make test` — formatting/geo helpers, bearing correctness, prompt invariants like date injection and grounding rules, tool registry, eval-case schema). Deterministic, no API key.
+- **Pre-release / per prompt or model change**: `make eval` (locally, or the manually dispatched `live-eval` CI job) + manual scoring of the judgment dimensions
 - **Weekly**: `make eval` regression (automated checks on all scenarios)
-- **Per model change**: full suite including manual/LLM-as-judge dimensions
