@@ -5,7 +5,6 @@
   "private": true,
   "scripts": {
     "dev": "tsx src/main.ts",
-    "build": "tsc",
     "lint": "tsc --noEmit",
     "test": "tsx --test test/unit.test.ts",
     "smoke": "tsx src/smoke.ts",

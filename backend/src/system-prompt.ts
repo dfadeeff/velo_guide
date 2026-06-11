@@ -128,6 +128,12 @@ End with:
 Concise, warm, practical. Like a Dutch cycling friend who hands you a finished plan, not one who thinks out loud. Use occasional Dutch terms (fietspad, knooppunt, pontje, terrasje) with brief English context.`;
 }
 
+// Backstop for the premature-stop failure mode: sent as a follow-up turn when
+// the model gathered tool data but ended its turn without writing the plan.
+// Shared by the server, the smoke harness, and the eval runner.
+export const SYNTHESIS_REPROMPT =
+  "You gathered the data but didn't write the plan. Using ONLY the tool results already in this conversation (do not call any more tools), write the complete final itinerary now.";
+
 // Injected into the user turn when fast mode is requested. Optimizes wall-clock
 // latency by minimizing model turns (batch tool calls) and output length.
 export const FAST_MODE_INSTRUCTION = `[FAST MODE — optimize for speed]

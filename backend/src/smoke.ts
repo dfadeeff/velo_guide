@@ -16,7 +16,7 @@ if (!process.env.OPENROUTER_API_KEY) {
 }
 
 const { createVeloGuideSession } = await import("./agent.js");
-const { FAST_MODE_INSTRUCTION } = await import("./system-prompt.js");
+const { FAST_MODE_INSTRUCTION, SYNTHESIS_REPROMPT } = await import("./system-prompt.js");
 type AgentSessionEvent = import("@earendil-works/pi-coding-agent").AgentSessionEvent;
 
 const fast = process.env.FAST === "1";
@@ -85,9 +85,7 @@ let reprompted = false;
 if (text.length < 20) {
   reprompted = true;
   process.stderr.write("  ⟳ empty turn — re-prompting for synthesis\n");
-  await session.prompt(
-    "You gathered the data but didn't write the plan. Using ONLY the tool results already in this conversation (do not call any more tools), write the complete final itinerary now.",
-  );
+  await session.prompt(SYNTHESIS_REPROMPT);
 }
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 

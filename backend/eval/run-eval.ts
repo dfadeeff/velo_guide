@@ -23,7 +23,7 @@ if (!process.env.OPENROUTER_API_KEY) {
 }
 
 const { createVeloGuideSession } = await import("../src/agent.js");
-const { FAST_MODE_INSTRUCTION } = await import("../src/system-prompt.js");
+const { FAST_MODE_INSTRUCTION, SYNTHESIS_REPROMPT } = await import("../src/system-prompt.js");
 type AgentSessionEvent = import("@earendil-works/pi-coding-agent").AgentSessionEvent;
 
 interface TestCase {
@@ -102,12 +102,7 @@ async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number
     await Promise.race([session.prompt(prompt, { images }), timeout]);
     if (text.length < 20) {
       // Same empty-turn backstop the server uses.
-      await Promise.race([
-        session.prompt(
-          "You gathered the data but didn't write the plan. Using ONLY the tool results already in this conversation (do not call any more tools), write the complete final itinerary now.",
-        ),
-        timeout,
-      ]);
+      await Promise.race([session.prompt(SYNTHESIS_REPROMPT), timeout]);
     }
   } catch (err: any) {
     session.dispose();

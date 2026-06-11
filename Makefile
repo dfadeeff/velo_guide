@@ -23,4 +23,4 @@ eval:
 	cd backend && npx tsx eval/run-eval.ts $(if $(CASE),--case $(CASE))
 
 clean:
-	rm -rf backend/node_modules backend/dist
+	rm -rf backend/node_modules

@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { createVeloGuideSession, DEFAULT_MODEL } from "./agent.js";
-import { FAST_MODE_INSTRUCTION } from "./system-prompt.js";
+import { FAST_MODE_INSTRUCTION, SYNTHESIS_REPROMPT } from "./system-prompt.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.resolve(__dirname, "../../frontend");
@@ -136,9 +136,7 @@ export function startServer(port: number, host: string) {
             // text and re-prompt once to synthesize from the data already in
             // context — no new tool calls needed.
             if (textCharsThisTurn < 20) {
-              await session.prompt(
-                "You gathered the data but didn't write the plan. Using ONLY the tool results already in this conversation (do not call any more tools), write the complete final itinerary now.",
-              );
+              await session.prompt(SYNTHESIS_REPROMPT);
             }
           } catch (err: any) {
             ws.send(JSON.stringify({ type: "error", message: err.message }));
