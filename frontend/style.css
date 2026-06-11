@@ -236,6 +236,51 @@ body {
   color: inherit;
 }
 
+.feedback-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding-left: 2px;
+  animation: fadeIn 0.2s ease;
+}
+
+.feedback-ask {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.feedback-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.feedback-btn:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.feedback-comment {
+  flex: 1;
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.feedback-comment:focus {
+  border-color: var(--accent);
+}
+
 .message-images {
   display: flex;
   gap: 8px;

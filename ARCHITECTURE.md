@@ -10,7 +10,8 @@ streaming, image handling, context compaction, and retries. We supply only two
 things — the **tools** and the **system prompt** — which keeps the system small
 and debuggable.
 
-One turn flows like this:
+ The conversation is multi-turn over a persistent session; each turn flows like
+this:
 
 1. The model receives the system prompt (with the current date injected at
    session creation), the user's text (and any image), and the TypeBox schemas
@@ -63,7 +64,8 @@ strategy, and `make eval` verifies it end-to-end.
 | Stale sense of "today" | LLMs resolve "tomorrow" against their training cutoff. The current date (Europe/Amsterdam) is injected into the system prompt at session creation, so relative dates and `get_weather` calls resolve correctly |
 | Guessed compass directions | The model invents bearings ("ride northeast to Kinderdijk" — it's southeast). `plan_route` returns a computed per-leg cardinal bearing; the prompt forbids stating directions not present in tool output |
 | Unbalanced multi-day plans | A 13 km "day" between two 40 km days reads as a planning failure. Hard prompt rule: days must be roughly comparable (no day < half the longest, full days ≥ ~30 km) unless the user asks for a rest day |
-| Clarification loops | Answer-first policy: explicit defaults for date (tomorrow), trip length (1 day), fitness (moderate), destination (chosen, not asked); the only permitted question is a genuinely missing start location. Prompt rules alone proved ~70-90% reliable across eval runs, so a **pipeline guard** backstops them: a zero-tool reply matching the observed asking patterns ("how long", "which year", "I need to clarify") is discarded and re-prompted once with the defaults reminder — same architecture as the empty-turn guard |
+| Planning on missing/ambiguous parameters | A **deterministic intake gate** (`intake.ts`) runs before the agent on every turn: a tool-free extraction call (it has no tools attached, so it structurally cannot plan) resolves three parameters — start location (text **or photo**), trip length, start date — and classifies the turn (new trip / refinement / out-of-scope). A new trip missing its start or length, or carrying CONFLICTING dates ("today" + "from June 20" — a real voice-input failure: browser speech-to-text garbles words), gets one templated question and `session.prompt()` is never reached. A merely absent date is not worth a question: tomorrow is assumed and the plan opens by stating it. The gate asks at most once: if the user declines, stated defaults fill the gaps (1 day / Amsterdam / tomorrow), disclosed the same way. Refinements bypass the gate |
+| Clarification loops (post-gate) | With start/days/date settled upstream, everything else (destination, direction, fitness) is answer-first with explicit defaults. A **pipeline guard** backstops the prompt rules: a zero-tool reply matching the observed asking patterns ("how long", "which year", "I need to clarify") is discarded and re-prompted once — same architecture as the empty-turn guard |
 | Weather for far-future dates | `get_weather` validates the 16-day horizon, clamps straddling ranges, and instructs the model to plan anyway and advise checking later |
 | Impossible routes | Routing errors surfaced with explanation (water crossing, no bike route, etc.) |
 | Over-ambitious daily distances | System prompt includes fitness-level guidelines; agent flags unreasonable plans (eval: 200 km casual request) |
@@ -125,11 +127,13 @@ the rider matches the listed junction numbers against on-the-ground signage.
 
 ## Code Structure
 
-- `backend/src/agent.ts` — session factory (model selection, auth, compaction/retry settings)
+- `backend/src/agent.ts` — session factory (model selection via parameter or env, auth, compaction/retry settings)
 - `backend/src/system-prompt.ts` — domain prompt, built per session (date injection); fast-mode instruction
+- `backend/src/intake.ts` — intake gate: tool-free parameter extraction (start/days/date, photo-aware) parsed through a **TypeBox data model** (`IntakeExtractionSchema`: one definition yields the JSON Schema, the inferred TS type, and the runtime validator — junk normalizes to null = "ask the user", and `Value.Check` enforces the contract on every extraction); templated clarifying question; refusal defaults — pure helpers unit-tested offline
+- `backend/src/pipeline.ts` — the single shared conversation pipeline (intake gate → planning agent → reliability guards, narration strip) used by server, smoke, and eval, so the eval measures exactly what production runs; one long-lived instance per connection carries the multi-turn session
 - `backend/src/tools/` — 7 tools declared with `defineTool()` (schema-derived param types); shared result envelope in `utils/tool-result.ts`
-- `backend/src/utils/overpass.ts` — encapsulated Overpass client (cache, serialized queue, backoff) behind a single `queryOverpass()`
-- `backend/src/server.ts` — Express + WebSocket transport: streaming, narration strip, heartbeat, per-connection busy guard
-- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same typed `AgentSessionEvent` stream; `backend/eval/judge.ts` — LLM-as-judge scoring (separate judge model, calibrated rubric)
+- `backend/src/utils/overpass.ts` — encapsulated Overpass client (bounded cache, serialized queue, backoff) behind a single `queryOverpass()`; `utils/images.ts` — validation caps for untrusted client images
+- `backend/src/server.ts` — Express + WebSocket transport only (streaming relay, heartbeat, per-connection busy guard); all conversation logic lives in the pipeline
+- `backend/src/smoke.ts`, `backend/eval/run-eval.ts` — headless harnesses over the same pipeline; `backend/eval/judge.ts` — LLM-as-judge scoring (separate judge model, calibrated rubric)
 - `backend/test/unit.test.ts` — offline unit tests (geo/format helpers, bearing correctness, prompt invariants, tool registry, eval-case schema); run by CI on every push
 - `frontend/` — vanilla JS; streaming render and voice input encapsulated in small classes (`StreamingMessage`, `VoiceInput`)

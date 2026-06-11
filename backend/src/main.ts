@@ -17,4 +17,7 @@ if (!process.env.OPENROUTER_API_KEY) {
   process.exit(1);
 }
 
-startServer(port, host);
+startServer(port, host).catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

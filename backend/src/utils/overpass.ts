@@ -45,6 +45,10 @@ export interface OverpassElement {
   center?: { lat: number; lon: number };
 }
 
+// Bounded FIFO cache: OSM data is effectively static for a session, but a
+// long-running server must not grow without limit. FIFO (Map insertion order)
+// is enough — queries don't repeat across trips often enough for LRU to matter.
+const CACHE_MAX_ENTRIES = 500;
 const cache = new Map<string, OverpassElement[]>();
 
 // Serialize every request: chain promises so only one Overpass call is in flight
@@ -108,6 +112,9 @@ export async function queryOverpass(query: string): Promise<OverpassElement[]> {
   );
   const elements = await result;
   cache.set(query, elements);
+  if (cache.size > CACHE_MAX_ENTRIES) {
+    cache.delete(cache.keys().next().value!);
+  }
   return elements;
 }
 

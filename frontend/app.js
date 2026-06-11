@@ -66,9 +66,22 @@ class StreamingMessage {
 let ws = null;
 let pendingImages = [];
 let streamingMsg = null; // StreamingMessage while a reply is in flight
+let currentAssistantWrapper = null; // .message.assistant el of the in-flight reply
 let isStreaming = false;
 let activeTools = new Set();
 let hadSession = false; // a "ready" was received before — any later "ready" is a reconnect
+
+// Anonymous, client-generated id — NOT a login. Lets the feedback loop count
+// distinct visitors without any identity, auth, or PII. Persisted so repeat
+// visits from this browser share an id.
+function clientId() {
+  let id = localStorage.getItem("velo_client_id");
+  if (!id) {
+    id = (crypto.randomUUID && crypto.randomUUID()) || `c-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem("velo_client_id", id);
+  }
+  return id;
+}
 
 function connect() {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -113,14 +126,17 @@ function handleMessage(msg) {
       sendBtn.disabled = false;
       break;
 
-    case "response_start":
+    case "response_start": {
       isStreaming = true;
       setStatus("thinking", "Thinking...");
-      streamingMsg = new StreamingMessage(addMessage("assistant", ""));
+      const contentEl = addMessage("assistant", "");
+      currentAssistantWrapper = contentEl.parentElement;
+      streamingMsg = new StreamingMessage(contentEl);
       activeTools.clear();
       toolStatus.innerHTML = "";
       startTimer();
       break;
+    }
 
     case "delta":
       streamingMsg?.append(msg.text);
@@ -153,6 +169,10 @@ function handleMessage(msg) {
       toolStatus.innerHTML = "";
       streamingMsg?.finalize();
       streamingMsg = null;
+      // turn_id is sent only when the backend's feedback capture is enabled —
+      // render the thumbs up/down controls just for that reply.
+      if (msg.turn_id && currentAssistantWrapper) attachFeedback(currentAssistantWrapper, msg.turn_id);
+      currentAssistantWrapper = null;
       break;
 
     case "error":
@@ -163,6 +183,72 @@ function handleMessage(msg) {
       addMessage("assistant", `Error: ${msg.message}`);
       break;
   }
+}
+
+// Thumbs up/down on a delivered plan. One POST to /feedback; a downvote first
+// reveals an optional one-line reason box (the most useful signal for the eval
+// loop). The server joins this rating to the plan + tool trace it buffered for
+// this turn_id — the client never sends the plan back.
+function attachFeedback(wrapperEl, turnId) {
+  const bar = document.createElement("div");
+  bar.className = "feedback-bar";
+
+  const mkBtn = (label, title) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "feedback-btn";
+    b.textContent = label;
+    if (title) b.title = title;
+    return b;
+  };
+
+  const done = (text) => {
+    bar.innerHTML = "";
+    const note = document.createElement("span");
+    note.className = "feedback-ask";
+    note.textContent = text;
+    bar.appendChild(note);
+  };
+
+  const submit = (rating, comment) => {
+    fetch("/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId(), turn_id: turnId, rating, comment: comment || null }),
+    }).catch(() => {});
+    done("Thanks for the feedback 🙏");
+  };
+
+  const ask = document.createElement("span");
+  ask.className = "feedback-ask";
+  ask.textContent = "Was this helpful?";
+  const up = mkBtn("👍", "This plan was good");
+  const down = mkBtn("👎", "Something was off");
+  bar.append(ask, up, down);
+
+  up.onclick = () => submit("up", null);
+  down.onclick = () => {
+    bar.innerHTML = "";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "feedback-comment";
+    input.placeholder = "What was off? (optional) — Enter to send";
+    input.maxLength = 1000;
+    const send = mkBtn("Send", "Send feedback");
+    bar.append(input, send);
+    input.focus();
+    const go = () => submit("down", input.value.trim());
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        go();
+      }
+    });
+    send.onclick = go;
+  };
+
+  wrapperEl.appendChild(bar);
+  scrollToBottom();
 }
 
 function addSystemNote(text) {

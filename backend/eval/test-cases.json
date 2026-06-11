@@ -1,10 +1,52 @@
 [
   {
+    "id": "intake-gate",
+    "name": "Intake Gate - All Parameters Missing",
+    "input": "Plan a cycling trip",
+    "expect_clarification": true,
+    "turns": ["From Amsterdam, one day, starting tomorrow"],
+    "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois"],
+    "assertions": [
+      "The first reply is a question asking for start location, trip length, and start date — no plan",
+      "After the answer, a complete 1-day plan from Amsterdam is delivered",
+      "The plan does not re-ask for any of the three parameters"
+    ]
+  },
+  {
+    "id": "intake-defaults",
+    "name": "Intake Gate - User Refuses Details",
+    "input": "Plan a cycling trip",
+    "expect_clarification": true,
+    "turns": ["I don't care, just plan something nice"],
+    "expected_tools": ["geocode", "plan_route"],
+    "reply_must_match": "assum",
+    "assertions": [
+      "The plan opens by stating the assumed defaults: 1-day trip from Amsterdam starting tomorrow",
+      "A complete plan is delivered despite the refusal — no second question"
+    ]
+  },
+  {
+    "id": "conflicting-dates",
+    "name": "Intake Gate - Conflicting Dates",
+    "input": "kinderdijk today cycling trip from Amsterdam from June 20",
+    "expect_clarification": true,
+    "turns": ["June 20, one day"],
+    "expected_tools": ["geocode", "plan_route", "get_weather"],
+    "assertions": [
+      "The first reply asks which date counts instead of silently picking one",
+      "The final plan uses June 20 as the start date",
+      "The final plan starts from Amsterdam"
+    ]
+  },
+  {
     "id": "basic-day-trip",
-    "name": "Basic Day Trip",
+    "name": "Basic Day Trip - Date Assumed",
     "input": "Plan a one-day cycling trip from Amsterdam",
     "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois", "find_knooppunten"],
+    "reply_must_match": "assum|tomorrow",
     "assertions": [
+      "No clarifying question — start and length were given; the missing date defaults to tomorrow",
+      "The plan states the assumed start date (tomorrow) at the top",
       "Response contains a distance sourced from plan_route tool",
       "Response contains weather information from get_weather tool",
       "All named POIs appear in find_pois tool results",
@@ -16,6 +58,8 @@
     "id": "multi-day-experienced",
     "name": "Multi-Day Experienced Cyclist",
     "input": "Plan a 3-day trip through the Veluwe for an experienced cyclist",
+    "expect_clarification": true,
+    "turns": ["Start in Arnhem, leaving tomorrow"],
     "fast": false,
     "model": "anthropic/claude-sonnet-4.6",
     "expected_tools": ["geocode", "get_weather", "plan_route", "find_pois", "find_accommodation", "find_knooppunten"],
@@ -31,6 +75,8 @@
     "id": "specific-destination-beginner",
     "name": "Specific Destination for Beginner",
     "input": "I want to cycle from Rotterdam to Kinderdijk to see the windmills. I'm a beginner.",
+    "expect_clarification": true,
+    "turns": ["Just one day, tomorrow"],
     "expected_tools": ["geocode", "plan_route", "get_weather", "find_pois"],
     "assertions": [
       "Total cycling distance is appropriate for a beginner (at most ~40 km)",
@@ -43,6 +89,8 @@
     "id": "unreasonable-distance",
     "name": "Unreasonable Distance Request",
     "input": "I want to cycle 200 km in one day, I'm a casual cyclist",
+    "expect_clarification": true,
+    "turns": ["From Utrecht, starting tomorrow"],
     "expected_tools": [],
     "assertions": [
       "Agent flags 200 km as unreasonable for a casual cyclist",
@@ -54,6 +102,8 @@
     "id": "far-future-date",
     "name": "Far Future Date",
     "input": "Plan a cycling trip from Utrecht for December 2027",
+    "expect_clarification": true,
+    "turns": ["One day"],
     "expected_tools": ["geocode", "plan_route", "find_pois"],
     "assertions": [
       "Agent plans route and POIs normally",
@@ -65,6 +115,8 @@
     "id": "seasonal-tulips",
     "name": "Seasonal Query - Tulips",
     "input": "Where should I cycle to see tulips in April?",
+    "expect_clarification": true,
+    "turns": ["From Leiden, one day"],
     "expected_tools": ["geocode", "plan_route"],
     "assertions": [
       "Keukenhof or Lisse area is suggested",
@@ -80,6 +132,7 @@
     "expected_tools": ["geocode", "plan_route"],
     "reply_must_match": "windmill|molen|kinderdijk|polder",
     "assertions": [
+      "No clarifying question — the missing date defaults to tomorrow and is stated",
       "Image is recognized as a Dutch windmill / polder landscape",
       "A matching region is suggested (e.g. Kinderdijk windmill area)",
       "A route is planned from Rotterdam to the suggested area"

@@ -56,6 +56,18 @@ How does the system handle edge cases and failures?
 
 **Metric**: `graceful_handling_rate`. Target: 100%.
 
+### 6b. Intake Correctness (Critical)
+Does the system plan only on settled parameters? (Voice input makes garbled requests routine.)
+
+**Test cases** (automated in `eval/test-cases.json`, checked programmatically by `make eval`):
+- Start or trip length missing → exactly one clarifying question naming the missing pieces, ZERO tools called before it (`intake-gate`)
+- Conflicting dates ("today" + "from June 20") → asks which date counts instead of silently picking one (`conflicting-dates`)
+- Date merely absent → NO question; tomorrow is assumed and stated as the first line of the plan (`basic-day-trip`)
+- User refuses details → plans on stated defaults (1 day / Amsterdam / tomorrow), disclosed as the first line (`intake-defaults`)
+- Refinement turns ("make day 2 shorter") → bypass the gate, no re-asking
+
+**Metric**: `intake_correctness_rate` = gated-when-required + not-gated-when-complete + assumption-disclosed. Target: 100% (the gate and the disclosure are deterministic code paths; only the extraction call is probabilistic).
+
 ### 7. Dutch Cycling Authenticity
 Does the output demonstrate genuine Netherlands cycling knowledge?
 
@@ -168,9 +180,45 @@ and the product guidance follows the same data: ambitious multi-day trips are
 where `MODEL=anthropic/claude-sonnet-4.6` earns its ~3× cost; Haiku stays the
 default for everything else.
 
+### Production feedback loop (`make feedback-report`)
+
+The offline suite and the LLM-judge both rely on *us* anticipating what to test.
+Real users surface what we didn't. An **off-by-default** feedback sink closes that
+gap and feeds it straight back into this plan:
+
+- **Capture.** Set `FEEDBACK_DB=<path>` and the web UI shows a 👍/👎 under each
+  delivered plan (a 👎 opens an optional one-line "what was off?"). The rating is
+  stored with the **trace that produced it** — the user turn, the final plan text,
+  the tool calls, and the model — in a local SQLite file (Node's built-in
+  `node:sqlite`, no dependency). Unset → no DB, no controls, zero overhead: the
+  core prototype stays clean. It is **not** session persistence and carries **no
+  identity** beyond an anonymous, browser-generated id (no auth, no PII) — full
+  conversation storage remains a scaling-tier concern (see DECISIONS.md), not a
+  prototype feature. The plan/tool trace is read server-side from a per-turn
+  buffer keyed by `turn_id`, never trusted from the client, so a rating can't
+  forge what the system actually said.
+- **Close the loop.** `make feedback-report` prints the satisfaction rate and —
+  the point — emits every **downvoted** turn as a candidate regression case in the
+  exact shape of `test-cases.json`: `input` = the user turn, `expected_tools` = the
+  tool trace that actually ran, `assertions` = the user's stated reason. A real
+  thumbs-down becomes a triageable test; drop it into the suite, fix the
+  prompt/tool, and the automated checks above guard the regression forever after.
+  This is the same path the LLM-judge already drove manually (a judged "~€5–6
+  ticket" became the numbers-grounding rule) — now sourced from production, not
+  just from our own anticipation.
+- **Metrics it adds.** `satisfaction_rate` = 👍 / total as a top-line trend, and a
+  steady stream of human-labelled traces for measuring **judge calibration** (do
+  the LLM-judge verdicts agree with real user 👍/👎?) — the residual-risk item
+  flagged under Limitations.
+
+This is deliberately thin: capture + report, no dashboards or pipelines (those are
+the ×100/×10000 observability story). It exists to make the evaluation loop
+*self-feeding* rather than purely author-driven.
+
 ### Future automation
 
 1. **A/B model comparison**: run the same judged suite across Claude Haiku (default) vs Claude Sonnet (quality upgrade) vs Gemini Flash (cost floor), compare dimension averages
+2. **Feedback-sourced regression suite**: auto-triage `make feedback-report` candidates (cluster by the reported problem, dedup against existing cases) into a growing labelled set; track satisfaction_rate and judge-vs-human agreement over releases
 
 ## Evaluation Cadence
 
