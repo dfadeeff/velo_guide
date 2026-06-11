@@ -232,7 +232,7 @@ export async function startServer(port: number, host: string) {
               turn_text: text,
               plan_text: outcome.text,
               tool_calls: outcome.toolCalls,
-              model: process.env.MODEL ?? DEFAULT_MODEL,
+              model: pipeline.model, // the pipeline's resolved model, not a re-derived guess
             });
           }
         } catch (err: any) {

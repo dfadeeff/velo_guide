@@ -23,7 +23,7 @@
 //      text) → one synthesis re-prompt. Post-gate clarification loop (zero
 //      tools + an asking reply) → discard + one answer-first re-prompt.
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { createVeloGuideSession } from "./agent.js";
+import { createVeloGuideSession, DEFAULT_MODEL } from "./agent.js";
 import {
   CLARIFICATION_PATTERN,
   CLARIFICATION_REPROMPT,
@@ -72,7 +72,11 @@ export interface PipelineOptions {
 }
 
 export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
-  const session = await createVeloGuideSession({ model: opts.model });
+  // Resolve the model HERE so the pipeline is the single source of truth for the
+  // turn's model — consumers (e.g. feedback capture) read pipeline.model rather
+  // than re-deriving it from process.env, which could disagree with an override.
+  const model = opts.model ?? process.env.MODEL ?? DEFAULT_MODEL;
+  const session = await createVeloGuideSession({ model });
   const emit = (e: PipelineEvent) => opts.onEvent?.(e);
 
   // Per-turn tracking for the guards; reset at each prompt.
@@ -250,19 +254,28 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
     if (fast) parts.push(FAST_MODE_INSTRUCTION);
     const images = [...pendingImages, ...(input.images ?? [])];
     const pendingHadImages = pendingImages.length > 0;
+    // The text the user actually typed across the (buffered) image turns — used to
+    // distinguish a photo-derived location from one named in words.
+    const userText = [...pendingTexts, input.text].join(" ").toLowerCase();
     pendingTexts = [];
     pendingImages = [];
 
-    // A location identified from a photo this turn is a GUESS — disclose it for
-    // confirmation (and remember it as text so later turns need no re-upload).
-    const photoDerived = (turnHasImages || pendingHadImages) && !!intake?.start_location && intake.intent !== "refinement";
-    if (photoDerived && intake?.start_location) photoLocationHint = intake.start_location;
+    // A location identified from a PHOTO (not stated in the text) is a guess —
+    // disclose it for confirmation and remember it as text for later turns. If the
+    // user typed the city, it is NOT photo-derived, so we must not claim "I
+    // identified the photo as <that city>" (e.g. "plan from Amsterdam" + an
+    // unrelated bike photo).
+    const loc = intake?.start_location ?? "";
+    const locationFromText = !!loc && userText.includes(loc.toLowerCase());
+    const photoDerived =
+      (turnHasImages || pendingHadImages) && !!loc && !locationFromText && intake?.intent !== "refinement";
+    if (photoDerived) photoLocationHint = loc;
 
     // Pin the disclosures the product rules require above the plan (done in code,
     // never delegated to the model): the photo identification, then any assumed
     // defaults.
     const notices: string[] = [];
-    if (photoDerived && intake?.start_location) notices.push(photoConfirmNotice(intake.start_location));
+    if (photoDerived) notices.push(photoConfirmNotice(loc));
     if (intake && assumed.length) notices.push(assumptionNotice(intake, assumed));
     turnPreamble = notices.join("\n\n");
 
@@ -273,6 +286,8 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
 
   return {
     runTurn,
+    // The resolved model for this pipeline's session — the single source of truth.
+    model,
     // Cancel the in-flight turn: aborts the agent and waits for it to go idle.
     // The awaiting runTurn then returns with whatever text was produced so far.
     abort: async () => {

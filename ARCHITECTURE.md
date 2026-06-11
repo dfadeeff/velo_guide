@@ -54,6 +54,20 @@ chats fast without a manual reset, the intake extractor re-sends only the curren
 turn's image and carries a photo-resolved location forward as cheap text instead
 of re-processing every uploaded photo each turn.
 
+**Why three LLM calls bypass pi-agent.** The *planner* is a full pi-agent session
+(the deliverable's "pi-agent" requirement). Three auxiliary calls deliberately use
+a plain OpenRouter chat request instead: the **intake extraction** (`intake.ts`),
+**Gemini STT** (`stt.ts`), and the **LLM-as-judge** (`judge.ts`). The reason is
+that these are single-shot, tool-free classification/transcription calls — not
+agentic loops. The intake gate in particular *must not* be a planning agent: it
+runs with **no tools attached so it is structurally incapable of routing or
+planning**, which is the whole safety property. Spinning up a full coding-agent
+session (loop, compaction, retries, tool registry) for one JSON extraction would
+add latency and surface area for no benefit. They share one shape — a temperature-0
+completion whose JSON is parsed defensively — and could be unified behind a single
+thin client (or pi-ai's `getModel`) as a refactor; today they are three small,
+independent `fetch` calls.
+
 **Why this makes a good velo guide for a *specific* country.** The
 "Netherlands-ness" is not a parameter — it is baked into three layers:
 

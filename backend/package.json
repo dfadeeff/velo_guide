@@ -11,7 +11,6 @@
     "eval": "tsx eval/run-eval.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "^0.78.1",
     "@earendil-works/pi-ai": "^0.78.1",
     "@earendil-works/pi-coding-agent": "^0.78.1",
     "dotenv": "^16.4.7",
