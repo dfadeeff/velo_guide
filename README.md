@@ -71,15 +71,17 @@ curl -s -X POST http://localhost:12345/api/interpreter \
 
 ## Architecture
 
-Single pi-agent with 7 custom tools + web chat UI.
+Single pi-agent with 7 custom tools, fronted by a deterministic **intake gate**, + web chat UI.
 
 ```
-Browser (chat) ←WebSocket→ Express server ←SDK→ pi-agent session
-                                                     ↓
-                                               7 tools
-                                                     ↓
-              OpenRouteService / OSRM / OSM Overpass / Open-Meteo / Nominatim
+Browser (chat) ←WebSocket→ Express server → intake gate ─(start/days/date settled)→ pi-agent session
+                                               │                                         ↓
+                                  (anything missing/conflicting)                      7 tools
+                                               │                                         ↓
+                                     one targeted question        OpenRouteService / OSRM / OSM Overpass / Open-Meteo / Nominatim
 ```
+
+Before any planning, the gate (a tool-free extraction — it cannot route or plan) settles three parameters: **start location** (text or photo), **trip length (days)**, and **start date** (for a real forecast). A missing start or length → one targeted question, and the planning agent is never invoked. A missing date is never asked — tomorrow is assumed and stated at the top of the plan; only *conflicting* dates ("today" vs "from June 20") trigger the question. The gate asks at most once: decline to specify and it plans with stated defaults (1 day, from Amsterdam, starting tomorrow), disclosing the assumption. Refinement turns ("make day 2 shorter") skip the gate.
 
 ### Tools
 
@@ -135,7 +137,15 @@ make test    # Offline unit tests (no network, no API key)
 make run     # Start dev server
 make smoke   # One real headless agent turn with tool/latency trace + grounding checks
 make eval    # Run the eval suite (backend/eval/test-cases.json) with a pass/fail scorecard
+make feedback-report  # Satisfaction rate + downvotes → candidate regression cases (needs FEEDBACK_DB)
 ```
+
+**Optional feedback loop** (off by default): set `FEEDBACK_DB=./feedback.db` in
+`.env` to show a 👍/👎 under each plan and capture it — with the tool trace that
+produced it — to a local SQLite file (Node's built-in `node:sqlite`, no extra
+dependency). `make feedback-report` turns downvotes into candidate regression
+cases for the eval suite. It's an evaluation hook, not session persistence — no
+auth, no PII, just an anonymous client id. See [EVALUATION.md](EVALUATION.md).
 
 Add `JUDGE=1` to `make eval` for the LLM-as-judge pass: a second model (Sonnet by
 default) verdicts the judgment-call assertions, scores quality dimensions 1–5, and

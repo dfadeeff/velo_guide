@@ -13,7 +13,13 @@ import { buildSystemPrompt } from "./system-prompt.js";
 
 export const DEFAULT_MODEL = "anthropic/claude-haiku-4.5";
 
-export async function createVeloGuideSession() {
+export interface SessionOptions {
+  // Explicit override beats the MODEL env var — callers (eval per-case model
+  // routing) pass it as a parameter instead of mutating process.env.
+  model?: string;
+}
+
+export async function createVeloGuideSession(opts: SessionOptions = {}) {
   const authStorage = AuthStorage.create("/tmp/velo-guide/auth.json");
   authStorage.setRuntimeApiKey("openrouter", process.env.OPENROUTER_API_KEY!);
 
@@ -28,7 +34,7 @@ export async function createVeloGuideSession() {
   // lowest cost (google/gemini-2.5-flash). All via the same OPENROUTER_API_KEY.
   // Cast: getModel's id param is a union of known literals; an env override is
   // an arbitrary string that OpenRouter resolves at runtime.
-  const modelId = (process.env.MODEL ?? DEFAULT_MODEL) as Parameters<typeof getModel>[1];
+  const modelId = (opts.model ?? process.env.MODEL ?? DEFAULT_MODEL) as Parameters<typeof getModel>[1];
   const model = getModel("openrouter", modelId);
   if (!model) throw new Error(`Model ${modelId} not found`);
 

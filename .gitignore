@@ -3,6 +3,12 @@ dist/
 .env
 *.tsbuildinfo
 
+# Local feedback capture (FEEDBACK_DB) and its triage output
+*.db
+*.db-journal
+*.db-wal
+backend/eval/regression-candidates.json
+
 .venv/
 .idea/
 .vscode/

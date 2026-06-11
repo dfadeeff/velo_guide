@@ -1,8 +1,9 @@
-// Runnable eval harness: drives each case in test-cases.json through a real
-// headless agent session and checks the *automatable* half of EVALUATION.md —
-// tool usage and grounding (tool-sourced distances, junction numbers, POI
-// names, no fabricated junction sequences). Judgment-call assertions from the
-// JSON (e.g. "beginner-friendly advice is given") are printed for manual /
+// Runnable eval harness: drives each case in test-cases.json through the
+// PRODUCTION pipeline (intake gate + guards — exactly what the server runs)
+// and checks the *automatable* half of EVALUATION.md — intake behavior, tool
+// usage, and grounding (tool-sourced distances, junction numbers, POI names,
+// no fabricated junction sequences). Judgment-call assertions from the JSON
+// (e.g. "beginner-friendly advice is given") are printed for manual /
 // LLM-as-judge review, not scored.
 //
 // Usage:
@@ -26,11 +27,10 @@ if (!process.env.OPENROUTER_API_KEY) {
   process.exit(1);
 }
 
-const { createVeloGuideSession } = await import("../src/agent.js");
-const { CLARIFICATION_PATTERN, CLARIFICATION_REPROMPT, FAST_MODE_INSTRUCTION, SYNTHESIS_REPROMPT } =
-  await import("../src/system-prompt.js");
+const { createVeloGuidePipeline } = await import("../src/pipeline.js");
 const { judgeReply } = await import("./judge.js");
-type AgentSessionEvent = import("@earendil-works/pi-coding-agent").AgentSessionEvent;
+type PipelineEvent = import("../src/pipeline.js").PipelineEvent;
+type TurnOutcome = import("../src/pipeline.js").TurnOutcome;
 type JudgeResult = import("./judge.js").JudgeResult;
 
 const useJudge = process.env.JUDGE === "1";
@@ -39,10 +39,14 @@ interface TestCase {
   id: string;
   name: string;
   input: string;
+  // The intake gate must hold the first turn: zero tools + a targeted question.
+  expect_clarification?: boolean;
+  // Follow-up user turns sent after `input` (intake answers or refinements).
+  turns?: string[];
   expected_tools: string[];
   assertions: string[];
   image?: string; // path relative to eval/ — sent as multimodal input
-  reply_must_match?: string; // regex the reply must satisfy (case-insensitive)
+  reply_must_match?: string; // regex the final reply must satisfy (case-insensitive)
   fast?: boolean; // per-case mode override (e.g. heavy multi-day planning needs detailed mode)
   model?: string; // per-case model override — measured model routing (see EVALUATION.md)
 }
@@ -64,7 +68,7 @@ interface Check {
   detail?: string;
 }
 
-const CASE_TIMEOUT_MS = 300_000;
+const TURN_TIMEOUT_MS = 300_000;
 // Fast mode mirrors the web UI default; FAST=0 evaluates the detailed path.
 const fast = process.env.FAST !== "0";
 
@@ -82,67 +86,70 @@ if (!cases.length) {
 }
 
 async function runCase(tc: TestCase): Promise<{ checks: Check[]; elapsed: number; reply: string; judge?: JudgeResult; plannedTrip: boolean }> {
-  // Per-case model override (cases run sequentially; restore after creation).
-  const savedModel = process.env.MODEL;
-  if (tc.model) process.env.MODEL = tc.model;
-  const session = await createVeloGuideSession();
-  if (tc.model) {
-    if (savedModel === undefined) delete process.env.MODEL;
-    else process.env.MODEL = savedModel;
-  }
-
   const toolCalls: string[] = [];
   // Raw stringified result per tool name — grounding checks regex into this.
   const toolOutputs: Record<string, string> = {};
-  let text = "";
 
-  session.subscribe((event: AgentSessionEvent) => {
-    if (event.type === "tool_execution_start") {
-      toolCalls.push(event.toolName);
-      text = ""; // mirror the server-side narration strip
-    }
-    if (event.type === "tool_execution_end") {
-      const out = JSON.stringify(event.result ?? "");
-      toolOutputs[event.toolName] = (toolOutputs[event.toolName] ?? "") + out;
-    }
-    if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-      text += event.assistantMessageEvent.delta;
-    }
+  const pipeline = await createVeloGuidePipeline({
+    model: tc.model,
+    onEvent: (event: PipelineEvent) => {
+      if (event.type === "tool_start") toolCalls.push(event.name);
+      if (event.type === "tool_end") {
+        toolOutputs[event.name] = (toolOutputs[event.name] ?? "") + JSON.stringify(event.result ?? "");
+      }
+    },
   });
 
-  const t0 = Date.now();
   const caseFast = tc.fast ?? fast;
-  const prompt = caseFast ? `${tc.input}\n\n${FAST_MODE_INSTRUCTION}` : tc.input;
-  const images = tc.image ? [loadImage(tc.image)] : undefined;
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`case timed out after ${CASE_TIMEOUT_MS / 1000}s`)), CASE_TIMEOUT_MS),
-  );
+  const checks: Check[] = [];
+  const t0 = Date.now();
+
+  const runTurn = (text: string, images?: ReturnType<typeof loadImage>[]) => {
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`turn timed out after ${TURN_TIMEOUT_MS / 1000}s`)), TURN_TIMEOUT_MS),
+    );
+    return Promise.race([pipeline.runTurn({ text, images, fast: caseFast }), timeout]);
+  };
+
+  let outcome: TurnOutcome;
   try {
-    await Promise.race([session.prompt(prompt, { images }), timeout]);
-    // Same reliability guards the server applies (eval measures the
-    // production pipeline, not the bare model).
-    if (text.length < 20) {
-      await Promise.race([session.prompt(SYNTHESIS_REPROMPT), timeout]);
-    } else if (toolCalls.length === 0 && CLARIFICATION_PATTERN.test(text)) {
-      text = "";
-      await Promise.race([session.prompt(CLARIFICATION_REPROMPT), timeout]);
+    outcome = await runTurn(tc.input, tc.image ? [loadImage(tc.image)] : undefined);
+
+    // Intake-gate check on the FIRST turn: held (question, zero tools) when
+    // parameters are missing; passed straight through when they are complete.
+    if (tc.expect_clarification) {
+      const held = outcome.kind === "clarification" && outcome.toolCalls.length === 0;
+      checks.push({
+        name: "intake gate held before planning (zero tools + question)",
+        status: held ? "pass" : "fail",
+        detail: held ? undefined : `kind=${outcome.kind}, tools=[${outcome.toolCalls.join(", ")}]`,
+      });
+    } else if (outcome.kind === "clarification") {
+      checks.push({
+        name: "no unexpected intake question",
+        status: "fail",
+        detail: `gate asked despite complete parameters: ${outcome.text.slice(0, 120)}`,
+      });
+    }
+
+    for (const turn of tc.turns ?? []) {
+      outcome = await runTurn(turn);
     }
   } catch (err: any) {
-    session.dispose();
+    pipeline.dispose();
     return {
-      checks: [{ name: "completed without error", status: "fail", detail: err.message }],
+      checks: [...checks, { name: "completed without error", status: "fail", detail: err.message }],
       elapsed: (Date.now() - t0) / 1000,
-      reply: text,
+      reply: "",
       plannedTrip: toolCalls.length > 0,
     };
   }
   const elapsed = (Date.now() - t0) / 1000;
-  session.dispose();
+  pipeline.dispose();
 
-  const checks: Check[] = [];
-  const allToolOutput = Object.values(toolOutputs).join("\n");
+  const text = outcome.text;
 
-  // 1. Expected tools were called (subset check; extra calls are fine).
+  // 1. Expected tools were called (subset check across all turns; extra calls are fine).
   if (tc.expected_tools.length) {
     const missing = tc.expected_tools.filter((t) => !toolCalls.includes(t));
     checks.push({
@@ -289,6 +296,7 @@ console.log(`Running ${cases.length} case(s) — mode: ${fast ? "fast (default)"
 for (const tc of cases) {
   console.log(`━━━ ${tc.id}: ${tc.name}`);
   console.log(`    input: ${tc.input}`);
+  for (const t of tc.turns ?? []) console.log(`    then:  ${t}`);
   const { checks, elapsed, reply, judge, plannedTrip } = await runCase(tc);
 
   let failed = false;
