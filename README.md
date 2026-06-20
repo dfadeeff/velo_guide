@@ -112,11 +112,28 @@ The UI also exposes **Stop** (cancel an in-flight plan via the SDK's `session.ab
 | `find_knooppunten` | OSM Overpass | Dutch cycling junction network |
 | `web_search` | DuckDuckGo | Local tips, events, seasonal info |
 
+### Why pi-agent
+
+[Pi](https://pi.dev/) is an open-source (MIT) agent harness by Earendil. It ships three packages: **pi-coding-agent** (the agent runtime), **pi-agent-core** (tool calling + state management), and **pi-ai** (a unified multi-provider LLM API — Anthropic, OpenAI, Google, OpenRouter, etc.). In SDK/embedded mode (`createAgentSession`), it gives us:
+
+- **ReAct-style agentic loop** — the model calls tools, reads results, and decides whether to call more or write the final answer; we supply only the tools and the system prompt.
+- **Typed tool definitions** (`defineTool` + TypeBox schemas) — parameter types are derived end-to-end from the schema; pi-agent validates every tool call against it before our `execute` runs.
+- **Streaming events** (`session.subscribe`) — `text_delta`, `tool_execution_start/end`, compaction, retry events; we relay these over WebSocket for live tool-activity chips and progressive rendering.
+- **Context compaction** — automatic conversation summarisation when approaching the token limit, so multi-turn sessions don't silently truncate.
+- **Auto-retry** — configurable retry logic for transient LLM failures (we set `maxRetries: 3`).
+- **Image support** — `session.prompt(text, { images })` passes images alongside text; the model sees them natively.
+- **Cancellation** — `session.abort()` stops a running turn cleanly (powers the Stop button).
+- **Session lifecycle** — `session.dispose()` frees resources (powers + New trip).
+- **`noTools: "builtin"`** — disables pi's default coding tools (read/write/bash/grep) so the model sees only our 7 domain tools and cannot shell out or edit files.
+- **Model-agnostic** — `getModel("openrouter", id)` resolves any OpenRouter-routed model; one env var switches between Haiku, Sonnet, Gemini Flash.
+
+This means VeloGuide's own code is domain logic (tools, prompt, intake gate, pipeline guards) — the agentic loop, schema validation, streaming, compaction, retries, and multi-provider auth are all inherited from the SDK.
+
 ### Stack
 
 - **LLM**: Claude Haiku 4.5 via OpenRouter (default; ~2× Sonnet's throughput, reliable tool-calling — see DECISIONS.md). Set `MODEL=anthropic/claude-sonnet-4.6` for higher reasoning quality, or `MODEL=google/gemini-2.5-flash` for the lowest cost.
 - **Vision** (photo → city): `VISION_MODEL`, default `google/gemini-2.5-flash`; used by the intake step only when an image is attached.
-- **Agent**: pi-agent SDK (`@earendil-works/pi-coding-agent`)
+- **Agent**: pi-agent SDK (`@earendil-works/pi-coding-agent`) — see [Why pi-agent](#why-pi-agent) above
 - **Backend**: TypeScript, Express, WebSocket
 - **Frontend**: Vanilla HTML/CSS/JS, marked.js for markdown
 - **Speech-to-text**: `STT_BACKEND` — `browser` (default, Web Speech API) · `gemini` (OpenRouter key) · `deepgram` (`DEEPGRAM_API_KEY`)
