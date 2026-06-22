@@ -252,7 +252,9 @@ test("photoConfirmNotice discloses the photo-identified location for confirmatio
   const { photoConfirmNotice } = await import("../src/intake.js");
   const note = photoConfirmNotice("Groningen");
   assert.ok(note.includes("Groningen"));
-  assert.ok(/identified the photo/i.test(note));
+  // The notice frames the location as a tentative guess from the photo (not a
+  // committed fact), so the user knows to correct it if wrong.
+  assert.ok(/looks like/i.test(note) && /photo/i.test(note), "frames it as a guess from the photo");
   assert.ok(/tell me|re-plan/i.test(note), "invites correction");
 });
 
