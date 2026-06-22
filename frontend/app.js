@@ -395,19 +395,53 @@ form.addEventListener("submit", (e) => {
   sendBtn.disabled = true;
 });
 
+// Downscale + re-encode an uploaded photo before sending. A full-resolution
+// photo (especially a desktop file, not phone-compressed) can exceed the
+// server's 8 MB base64 cap and get silently dropped — then the vision model
+// never sees it and the intake gate asks for a start location it should have
+// read from the image. Capping the longest side at 1568px (Claude's optimal
+// image resolution) and re-encoding as JPEG brings any photo to a few hundred
+// KB, so it always reaches the vision model.
+const MAX_IMAGE_DIM = 1568;
+function downscaleImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      // Re-encode as JPEG; data URL is "data:image/jpeg;base64,XXXX".
+      const out = canvas.toDataURL("image/jpeg", 0.85);
+      resolve({ dataUrl: out, base64: out.split(",")[1], mimeType: "image/jpeg" });
+    };
+    img.onerror = () => reject(new Error("could not decode image"));
+    img.src = dataUrl;
+  });
+}
+
 // Image upload
 imageInput.addEventListener("change", () => {
   const files = Array.from(imageInput.files);
   for (const file of files) {
     const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(",")[1];
-      pendingImages.push({ data: base64, mimeType: file.type });
+    reader.onload = async () => {
+      let result;
+      try {
+        result = await downscaleImage(reader.result);
+      } catch {
+        addSystemNote(`Couldn't read "${file.name}" — try a JPG or PNG.`);
+        return;
+      }
+      pendingImages.push({ data: result.base64, mimeType: result.mimeType });
 
       const item = document.createElement("div");
       item.className = "preview-item";
       const img = document.createElement("img");
-      img.src = reader.result;
+      img.src = result.dataUrl;
       const removeBtn = document.createElement("button");
       removeBtn.className = "remove-btn";
       removeBtn.textContent = "×";

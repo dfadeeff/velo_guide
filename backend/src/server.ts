@@ -218,9 +218,17 @@ export async function startServer(port: number, host: string) {
         let turnId: string | undefined;
         try {
           const text = typeof msg.text === "string" ? msg.text : "";
+          const rawImageCount = Array.isArray(msg.images) ? msg.images.length : 0;
+          const images = sanitizeImages(msg.images);
+          // A dropped image silently degrades the vision path (the intake gate
+          // then asks for a start location it should have read from the photo),
+          // so make the loss loud rather than invisible.
+          if (rawImageCount > images.length) {
+            console.warn(`dropped ${rawImageCount - images.length}/${rawImageCount} image(s) — over size cap or unsupported type`);
+          }
           const outcome = await pipeline.runTurn({
             text,
-            images: sanitizeImages(msg.images),
+            images,
             fast: msg.fast !== false, // fast is the default; clients opt out with fast === false
           });
           // Only buffer + advertise a turn_id when feedback is enabled — that is

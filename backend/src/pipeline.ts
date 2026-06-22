@@ -201,6 +201,12 @@ export async function createVeloGuidePipeline(opts: PipelineOptions = {}) {
     let intake: IntakeExtraction | undefined;
     try {
       intake = await extractIntake(extractionView());
+      // One concise line per turn so the gate's decision is visible: on an image
+      // turn that comes back start=null, the photo either didn't reach the vision
+      // model or wasn't a recognizable Dutch place — both show up here.
+      console.log(
+        `intake: intent=${intake.intent} start=${intake.start_location ?? "null"} days=${intake.days ?? "null"} date=${intake.start_date ?? "null"} in_scope=${intake.in_scope} images=${turnHasImages ? input.images!.length : 0}`,
+      );
     } catch (err: any) {
       console.error(`intake extraction failed (${err.message}) — proceeding with agent defaults`);
     }
